@@ -1,0 +1,9 @@
+.DS_Store
+misc/
+training/data/
+training/images/
+training/results/
+training/__pycache__/
+training/data.pickle
+
+
