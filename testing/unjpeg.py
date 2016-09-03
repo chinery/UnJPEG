@@ -15,7 +15,7 @@ import pickle
 
 import sys
 sys.path.append('../training/')
-from mlp import MLP, VisibleLayer, HiddenLayer
+from mlp import MLP, TopLayer, HiddenLayer
 
 
 def unjpeg(im):
@@ -59,9 +59,9 @@ def unjpeg(im):
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    im = scipy.misc.imread("test2.jpg",mode='YCbCr')/255
+    im = scipy.misc.imread("test.jpg",mode='YCbCr')/255
 
     cleanim = unjpeg(im)
 
     res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
-    res.save('result2.png')
+    res.save('result.png')

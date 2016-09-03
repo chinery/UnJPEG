@@ -143,12 +143,14 @@ class HiddenLayer(object):
         self.params = [self.W, self.b]
 
 # chin
-class VisibleLayer(HiddenLayer):
-    """ Attempting to add the error functions etc to the hidden layer
+class TopLayer(object):
+    """ Layer which just contains error functions
+        Has no maths, so the input must be the same dimensionality as the output
     """
-    def __init__(self, rng, input, n_in, n_out, W=None, b=None,
-                 activation=T.tanh):
-        HiddenLayer.__init__(self,rng,input,n_in,n_out,W,b,activation)
+    def __init__(self, input):
+        self.input = input
+        self.output = input
+
 
     # def negative_log_likelihood(self, y):
     #     """Return the mean of the negative log-likelihood of the prediction
@@ -258,26 +260,20 @@ class MLP(object):
 
         # The logistic regression layer gets as input the hidden units
         # of the hidden layer
-        self.topLayer = VisibleLayer(
-            rng=rng,
-            input=self.hiddenLayer.output,
-            n_in=n_hidden,
-            n_out=n_out,
-            activation=T.tanh
+        self.topLayer = TopLayer(
+            input=self.hiddenLayer.output
         )
         # end-snippet-2 start-snippet-3
         # L1 norm ; one regularization option is to enforce L1 norm to
         # be small
         self.L1 = (
-            abs(self.hiddenLayer.W).sum() #+ abs(self.hiddenLayer2.W).sum()
-            + abs(self.topLayer.W).sum()
+            abs(self.hiddenLayer.W).sum()
         )
 
         # square of L2 norm ; one regularization option is to enforce
         # square of L2 norm to be small
         self.L2_sqr = (
-            (self.hiddenLayer.W ** 2).sum() #+ (self.hiddenLayer2.W ** 2).sum()
-            + (self.topLayer.W ** 2).sum()
+            (self.hiddenLayer.W ** 2).sum()
         )
 
         # negative log likelihood of the MLP is given by the negative
@@ -291,7 +287,7 @@ class MLP(object):
 
         # the parameters of the model are the parameters of the two layer it is
         # made out of
-        self.params = self.hiddenLayer.params + self.topLayer.params
+        self.params = self.hiddenLayer.params
         # end-snippet-3
 
         # keep track of model input
@@ -623,4 +619,4 @@ def unjpeg(im,classifier):
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=1000,learning_rate=0.1,n_hidden=384,L2_reg=0.0001)
+    test_mlp(n_epochs=1000, batch_size=1000,learning_rate=0.1,n_hidden=192,L2_reg=0.0001)
