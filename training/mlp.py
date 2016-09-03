@@ -64,6 +64,8 @@ from PIL import Image
 
 import theano
 import theano.tensor as T
+from theano import pp
+import theano.tensor.basic
 from theano.tensor import fft
 
 import pickle
@@ -145,7 +147,8 @@ class HiddenLayer(object):
 # chin
 class TopLayer(object):
     """ Layer which just contains error functions
-        Has no maths, so the input must be the same dimensionality as the output
+        Has no maths, so the output will be the same dimensionality as the input
+        So make sure whatever is being passed in matches the dimensionality of the ground truth
     """
     def __init__(self, input):
         self.input = input
@@ -201,6 +204,24 @@ class TopLayer(object):
         return T.sqrt(T.mean((self.output - y)**2))
         # return T.sqrt(T.mean((fft.rfft(self.output)-fft.rfft(y))**2))
         
+class ScoreLayer(HiddenLayer):
+    """ Take input from n-dimensions and output a float
+    """
+
+    def __init__(self,rng, input, n_in, n_out, W=None, b=None):
+        HiddenLayer.__init__(self,rng,input,n_in,n_out,W,b,T.mean)
+
+
+class PoolLayer(object):
+    """ Take n inputs and n scores and output the one with the best score
+    """
+    def __init__(self,imageinput,scoreinput):
+        imgs = T.stack(imageinput)
+        # label = T.zeros_like(T.stack(scoreinput))
+        # label = T.set_subtensor(label[T.argmax(scoreinput)],1)
+        # self.output = T.dot(label,imgs)
+        self.output = imgs[T.argmax(scoreinput)]
+
 
 
 # start-snippet-2
@@ -215,7 +236,7 @@ class MLP(object):
     class).
     """
 
-    def __init__(self, rng, input, n_in, n_hidden, n_out):
+    def __init__(self, rng, input, n_in, n_hidden, n_out, paralayers):
         """Initialize the parameters for the multilayer perceptron
 
         :type rng: numpy.random.RandomState
@@ -238,42 +259,62 @@ class MLP(object):
 
         """
 
-        # Since we are dealing with a one hidden layer MLP, this will translate
-        # into a HiddenLayer with a tanh activation function connected to the
-        # LogisticRegression layer; the activation function can be replaced by
-        # sigmoid or any other nonlinear function
-        self.hiddenLayer = HiddenLayer(
-            rng=rng,
-            input=input,
-            n_in=n_in,
-            n_out=n_hidden,
-            activation=T.tanh
+        self.hiddenLayers = [None]*paralayers
+        self.scoreLayers = [None]*paralayers
+        for i in range(0,paralayers):
+            self.hiddenLayers[i] = HiddenLayer(
+                rng=numpy.random.RandomState(1000+(i*2)),
+                input=input,
+                n_in=n_in,
+                n_out=n_hidden,
+                activation=T.tanh
+            )
+            if i == 0:
+                self.scoreLayers[i] = ScoreLayer(
+                    rng=numpy.random.RandomState(1001+(i*2)),
+                    input=self.hiddenLayers[i].output,
+                    n_in=n_in,
+                    n_out=n_hidden
+                )
+            else:
+                self.scoreLayers[i] = ScoreLayer(
+                    rng=numpy.random.RandomState(1001+(i*2)),
+                    input=self.hiddenLayers[i].output,
+                    n_in=n_in,
+                    n_out=n_hidden,
+                    W=self.scoreLayers[0].W,
+                    b=self.scoreLayers[0].b
+                )
+
+
+        self.poolLayer = PoolLayer(
+            imageinput=[layer.output for layer in self.hiddenLayers],
+            scoreinput=[layer.output for layer in self.scoreLayers]
         )
 
-        # self.hiddenLayer2 = HiddenLayer(
-        #     rng=rng,
-        #     input=self.hiddenLayer.output,
-        #     n_in=n_hidden,
-        #     n_out=n_hidden,
-        #     activation=T.tanh
-        # )
 
-        # The logistic regression layer gets as input the hidden units
-        # of the hidden layer
         self.topLayer = TopLayer(
-            input=self.hiddenLayer.output
+            input=self.poolLayer.output
         )
         # end-snippet-2 start-snippet-3
         # L1 norm ; one regularization option is to enforce L1 norm to
         # be small
+        # self.L1 = (
+        #     abs(self.hiddenLayer.W).sum()
+        # )
         self.L1 = (
-            abs(self.hiddenLayer.W).sum()
+            T.sum([abs(layer.W).sum() for layer in self.hiddenLayers]) +
+            abs(self.scoreLayers[0].W).sum()
         )
 
         # square of L2 norm ; one regularization option is to enforce
         # square of L2 norm to be small
+        # self.L2_sqr = (
+        #     (self.hiddenLayer.W ** 2).sum()
+        # )
         self.L2_sqr = (
-            (self.hiddenLayer.W ** 2).sum()
+            T.sum([(layer.W ** 2).sum() for layer in self.hiddenLayers]) +
+            (self.scoreLayers[0].W**2).sum()
         )
 
         # negative log likelihood of the MLP is given by the negative
@@ -287,7 +328,7 @@ class MLP(object):
 
         # the parameters of the model are the parameters of the two layer it is
         # made out of
-        self.params = self.hiddenLayer.params
+        self.params = [param for layer in self.hiddenLayers for param in layer.params] + self.scoreLayers[0].params
         # end-snippet-3
 
         # keep track of model input
@@ -360,7 +401,7 @@ def load_data(dataset):
 
 
 def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
-             dataset='', batch_size=10000, n_hidden=500, classifier=None):
+             dataset='', batch_size=10000, n_hidden=500, classifier=None, paralayers=1):
     """
     Demonstrate stochastic gradient descent optimization for a multilayer
     perceptron
@@ -417,7 +458,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
         input=x,
         n_in=8*8*3,
         n_hidden=n_hidden,
-        n_out=8*8*3
+        n_out=8*8*3,
+        paralayers=paralayers
     )
 
     # start-snippet-4
@@ -454,7 +496,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # start-snippet-5
     # compute the gradient of cost with respect to theta (sorted in params)
     # the resulting gradients will be stored in a list gparams
-    gparams = [T.grad(cost, param) for param in classifier.params]
+    gparams = [T.grad(cost, param,disconnected_inputs='ignore') for param in classifier.params]
 
     # specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs
@@ -619,4 +661,4 @@ def unjpeg(im,classifier):
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=1000,learning_rate=0.1,n_hidden=192,L2_reg=0.0001)
+    test_mlp(n_epochs=1000, batch_size=1000,learning_rate=0.1,n_hidden=192,L2_reg=0.0001,paralayers=15)
