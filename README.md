@@ -13,3 +13,7 @@ http://deeplearning.net/tutorial/mlp.html
 Plans:
 * Look into denoising literature to see if there is a better error measure that better preserves high frequencies than MSE
 * Try the layer/pooling technique from a CNN
+
+This branch is probably abandoned... the idea was to try running several filters in 'parallel' that would enable the NN to 'pick' which one to apply based on the image. Never really worked; it was either just using one 'path' or all of the weights were converging on the same thing -- never really investigated.
+
+Having checked the denoising paper that used the MLP, I'm going to go back to the basic model and just throw more layers/neurons at it! Maybe normalise the data too.

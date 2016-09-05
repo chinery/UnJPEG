@@ -117,9 +117,14 @@ class HiddenLayer(object):
         #        tanh.
         if W is None:
             W_values = numpy.asarray(
-                rng.uniform(
-                    low=-numpy.sqrt(6. / (n_in + n_out)),
-                    high=numpy.sqrt(6. / (n_in + n_out)),
+                # rng.uniform(
+                #     low=-numpy.sqrt(6. / (n_in + n_out)),
+                #     high=numpy.sqrt(6. / (n_in + n_out)),
+                #     size=(n_in, n_out)
+                # ),
+                rng.normal(
+                    loc=0,
+                    scale=numpy.sqrt(6/(n_in+n_out)),
                     size=(n_in, n_out)
                 ),
                 dtype=theano.config.floatX
@@ -216,16 +221,18 @@ class ScoreLayer(HiddenLayer):
         return (T.sqrt(T.mean((self.input - y)**2,axis=1)),self.output)
 
 
-class PoolLayer(object):
-    """ Take n inputs and n scores and output the one with the best score
+class PoolLayer(HiddenLayer):
+    """ Take inputs from n layers and combines them into one output
     """
-    def __init__(self,imageinput,scoreinput):
-        imgs = T.stack(imageinput)
-        scores = T.concatenate(scoreinput,axis=1)
-        # label = T.zeros_like(T.stack(scoreinput))
-        # label = T.set_subtensor(label[T.argmax(scoreinput)],1)
-        # self.output = T.dot(label,imgs)
-        self.output = imgs[T.argmin(scores,axis=1),T.arange(scores.shape[0]),:]
+    def __init__(self,rng,imageinput,n_out,paralayers,W=None,b=None,activation=T.tanh):
+        imgs = T.concatenate(imageinput,axis=1)
+        HiddenLayer.__init__(self,rng,imgs,paralayers*n_out,n_out,W,b,activation)
+        
+        # scores = T.concatenate(scoreinput,axis=1)
+        # # label = T.zeros_like(T.stack(scoreinput))
+        # # label = T.set_subtensor(label[T.argmax(scoreinput)],1)
+        # # self.output = T.dot(label,imgs)
+        # self.output = imgs[T.argmin(scores,axis=1),T.arange(scores.shape[0]),:]
 
 
 
@@ -266,7 +273,6 @@ class MLP(object):
         """
 
         self.hiddenLayers = [None]*paralayers
-        self.scoreLayers = [None]*paralayers
         for i in range(0,paralayers):
             self.hiddenLayers[i] = HiddenLayer(
                 rng=numpy.random.RandomState(1000+(i*2)),
@@ -275,25 +281,13 @@ class MLP(object):
                 n_out=n_hidden,
                 activation=T.tanh
             )
-            if i == 0:
-                self.scoreLayers[i] = ScoreLayer(
-                    rng=numpy.random.RandomState(1001+(i*2)),
-                    input=self.hiddenLayers[i].output,
-                    n_in=n_in
-                )
-            else:
-                self.scoreLayers[i] = ScoreLayer(
-                    rng=numpy.random.RandomState(1001+(i*2)),
-                    input=self.hiddenLayers[i].output,
-                    n_in=n_in,
-                    W=self.scoreLayers[0].W,
-                    b=self.scoreLayers[0].b
-                )
 
 
         self.poolLayer = PoolLayer(
+            rng = numpy.random.RandomState(1001),
             imageinput=[layer.output for layer in self.hiddenLayers],
-            scoreinput=[layer.output for layer in self.scoreLayers]
+            n_out = n_out,
+            paralayers=paralayers
         )
 
 
@@ -308,7 +302,7 @@ class MLP(object):
         # )
         self.L1 = (
             T.sum([abs(layer.W).sum() for layer in self.hiddenLayers]) +
-            abs(self.scoreLayers[0].W).sum()
+            abs(self.poolLayer.W).sum()
         )
 
         # square of L2 norm ; one regularization option is to enforce
@@ -318,7 +312,7 @@ class MLP(object):
         # )
         self.L2_sqr = (
             T.sum([(layer.W ** 2).sum() for layer in self.hiddenLayers]) +
-            (self.scoreLayers[0].W**2).sum()
+            (self.poolLayer.W**2).sum()
         )
 
         # negative log likelihood of the MLP is given by the negative
@@ -332,8 +326,7 @@ class MLP(object):
 
         # the parameters of the model are the parameters of the two layer it is
         # made out of
-        self.filterparams = [param for layer in self.hiddenLayers for param in layer.params] 
-        self.scoreparams = self.scoreLayers[0].params
+        self.params = [param for layer in self.hiddenLayers for param in layer.params] + self.poolLayer.params 
         # end-snippet-3
 
         # keep track of model input
@@ -341,23 +334,8 @@ class MLP(object):
 
         self.output = self.topLayer.output
 
-    def scoreerror(self,y):
-        errs = [layer.error(y) for layer in self.scoreLayers]
-        imgerrs = T.stack([t[0] for t in errs]).T
-        scoreerrs = T.concatenate([t[1] for t in errs],axis=1)
 
-        # if imgerrs.ndim != scoreerrs.ndim:
-        #     raise TypeError(
-        #         'imgerrs should have the same shape as scoreerrs',
-        #         ('imgerrs', imgerrs.ndim, 'scoreerrs', scoreerrs.ndim)
-        #     )
-
-        return T.sqrt(T.mean((imgerrs-scoreerrs)**2))
-
-
-
-
-def load_data(dataset):
+def load_data(dataset,m=0,s=1):
     ''' Loads the dataset
 
     :type dataset: string
@@ -378,6 +356,11 @@ def load_data(dataset):
         training_in = data['training_in']
         testing_gt = data['testing_gt']
         testing_in = data['testing_in']
+
+    training_gt = (training_gt-m)/s
+    training_in = (training_in-m)/s
+    testing_gt = (testing_gt-m)/s
+    testing_in = (testing_in-m)/s
 
     # # Load the dataset
     # with gzip.open(dataset, 'rb') as f:
@@ -449,7 +432,9 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 
 
    """
-    datasets = load_data(dataset)
+    m = 0
+    s = 1
+    datasets = load_data(dataset,m,s)
 
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
@@ -486,13 +471,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # the cost we minimize during training is the negative log likelihood of
     # the model plus the regularization terms (L1 and L2); cost is expressed
     # here symbolically
-    scorecost = (
-        classifier.scoreerror(y)
-        + L1_reg * classifier.L1
-        + L2_reg * classifier.L2_sqr
-    )
-
-    filtercost = (
+    cost = (
         classifier.error(y)
         + L1_reg * classifier.L1
         + L2_reg * classifier.L2_sqr
@@ -522,8 +501,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # start-snippet-5
     # compute the gradient of cost with respect to theta (sorted in params)
     # the resulting gradients will be stored in a list gparams
-    filtergparams = [T.grad(filtercost, param) for param in classifier.filterparams]
-    scoregparams = [T.grad(scorecost, param) for param in classifier.scoreparams]
+    gparams = [T.grad(cost, param) for param in classifier.params]
 
     # specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs
@@ -532,32 +510,18 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # B = [b1, b2, b3, b4], zip generates a list C of same size, where each
     # element is a pair formed from the two lists :
     #    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
-    filterupdates = [
+    updates = [
         (param, param - learning_rate * gparam)
-        for param, gparam in zip(classifier.filterparams, filtergparams)
-    ]
-    scoreupdates = [
-        (param, param - learning_rate * gparam)
-        for param, gparam in zip(classifier.scoreparams, scoregparams)
+        for param, gparam in zip(classifier.params, gparams)
     ]
 
     # compiling a Theano function `train_model` that returns the cost, but
     # in the same time updates the parameter of the model based on the rules
     # defined in `updates`
-    train_filter = theano.function(
+    train_model = theano.function(
         inputs=[index],
-        outputs=filtercost,
-        updates=filterupdates,
-        givens={
-            x: train_set_x[index * batch_size: (index + 1) * batch_size],
-            y: train_set_y[index * batch_size: (index + 1) * batch_size]
-        }
-    )
-
-    train_score = theano.function(
-        inputs=[index],
-        outputs=scorecost,
-        updates=scoreupdates,
+        outputs=cost,
+        updates=updates,
         givens={
             x: train_set_x[index * batch_size: (index + 1) * batch_size],
             y: train_set_y[index * batch_size: (index + 1) * batch_size]
@@ -600,8 +564,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
         epoch = epoch + 1
         for minibatch_index in range(n_train_batches):
 
-            minibatch_avg_cost = train_score(minibatch_index)
-            minibatch_avg_cost = train_filter(minibatch_index)
+            minibatch_avg_cost = train_model(minibatch_index)
             # iteration number
             iter = (epoch - 1) * n_train_batches + minibatch_index
 
@@ -625,7 +588,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                 with open('results/models/model{:04d}.pkl'.format(epoch), 'wb') as f:
                         pickle.dump(classifier, f)
 
-                cleanim = unjpeg(im,classifier)
+                cleanim = unjpeg(im,classifier,m,s)
                 res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
                 res.save('results/outimages/model{:04d}.png'.format(epoch))
 
@@ -667,7 +630,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
            ' ran for %.2fm' % ((end_time - start_time) / 60.)), file=sys.stderr)
 
 
-def unjpeg(im,classifier):
+def unjpeg(im,classifier,m=0,s=1):
     """
     Apply to an image
     """
@@ -693,14 +656,24 @@ def unjpeg(im,classifier):
     for i in range(0,math.ceil(h/8)):
         for j in range(0,math.ceil(w/8)):
             block = newim[i*8:(i+1)*8,j*8:(j+1)*8,:]
-            
+
+            block = (block-m)/s
+            # for k in range(0,3):
+            #     block[:,:,k] = (block[:,:,k]-0.5)/0.2
+
             x_data = block.reshape((1,8*8*3))
 
             y_data = predict_model(x_data)
 
-            result[i*8:(i+1)*8,j*8:(j+1)*8,:] = y_data.reshape((8,8,3))
+            nblock = y_data.reshape((8,8,3))
+
+            nblock = (nblock*s)+m
+            # for k in range(0,3):
+            #     nblock[:,:,k] = (nblock[:,:,k]*0.2)+0.5
+
+            result[i*8:(i+1)*8,j*8:(j+1)*8,:] = nblock
 
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=1,learning_rate=0.01,n_hidden=192,L2_reg=0.0001,paralayers=5)
+    test_mlp(n_epochs=1000, batch_size=1000, learning_rate=0.1,n_hidden=192,L2_reg=0.0001,paralayers=1)

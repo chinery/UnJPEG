@@ -57,6 +57,15 @@ for ix,imgpath in enumerate(images):
 			blockim.save(inmem,format='jpeg',quality=q,subsampling=ss)
 			jpegblock = scipy.misc.imread(inmem,mode='YCbCr')/255
 
+
+
+			# block = (block-0.5)/0.2
+			# jpegblock = (jpegblock-0.5)/0.2
+
+			# for k in range(0,3):
+			# 	block[:,:,k] = numpy.divide((block[:,:,k]-0.5),0.2)
+			# 	jpegblock[:,:,k] = numpy.divide((jpegblock[:,:,k]-0.5),0.2)
+
 			# # too many 'plain colour' patches, filter some/all
 			# if numpy.sqrt(numpy.mean((jpegblock-block)**2)) < 0.01 and random.randint(0,3) != 3:
 			# 	cskip += 1
@@ -88,6 +97,8 @@ if cskip != 0:
 	testing_gt = testing_gt[0:count,:]
 	testing_in = testing_in[0:count,:]
 
+print("Means Y: {} Cb: {} Cr: {}".format(numpy.mean(training_in[:,0:64]),numpy.mean(training_in[:,64:128]),numpy.mean(training_in[:,128:])))
+print("Vars Y: {} Cb: {} Cr: {}".format(numpy.var(training_in[:,0:64]),numpy.var(training_in[:,64:128]),numpy.var(training_in[:,128:])))
 
 print("")
 print("{} testing blocks".format(count))
