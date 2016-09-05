@@ -92,6 +92,18 @@ if cskip != 0:
 print("")
 print("{} testing blocks".format(count))
 print("{} blocks skipped".format(cskip))
+
+print("Shuffling")
+alltraining = numpy.concatenate([training_gt,training_in],axis=1)
+numpy.random.shuffle(alltraining)
+alltesting = numpy.concatenate([testing_gt,testing_in],axis=1)
+numpy.random.shuffle(alltesting)
+
+training_gt = alltraining[:,:8*8*3]
+training_in = alltraining[:,8*8*3:]
+testing_gt = alltesting[:,:8*8*3]
+testing_in = alltesting[:,8*8*3:]
+
 print("Saving data")
 
 with open('data.pickle', 'wb') as file:

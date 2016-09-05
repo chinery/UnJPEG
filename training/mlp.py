@@ -203,13 +203,17 @@ class TopLayer(object):
         
         return T.sqrt(T.mean((self.output - y)**2))
         # return T.sqrt(T.mean((fft.rfft(self.output)-fft.rfft(y))**2))
+
         
 class ScoreLayer(HiddenLayer):
     """ Take input from n-dimensions and output a float
     """
 
-    def __init__(self,rng, input, n_in, n_out, W=None, b=None):
-        HiddenLayer.__init__(self,rng,input,n_in,n_out,W,b,T.mean)
+    def __init__(self,rng, input, n_in, W=None, b=None):
+        HiddenLayer.__init__(self,rng,input,n_in,1,W,b,None)
+
+    def error(self,y):
+        return (T.sqrt(T.mean((self.input - y)**2,axis=1)),self.output)
 
 
 class PoolLayer(object):
@@ -217,10 +221,12 @@ class PoolLayer(object):
     """
     def __init__(self,imageinput,scoreinput):
         imgs = T.stack(imageinput)
+        scores = T.concatenate(scoreinput,axis=1)
         # label = T.zeros_like(T.stack(scoreinput))
         # label = T.set_subtensor(label[T.argmax(scoreinput)],1)
         # self.output = T.dot(label,imgs)
-        self.output = imgs[T.argmax(scoreinput)]
+        self.output = imgs[T.argmin(scores,axis=1),T.arange(scores.shape[0]),:]
+
 
 
 
@@ -273,15 +279,13 @@ class MLP(object):
                 self.scoreLayers[i] = ScoreLayer(
                     rng=numpy.random.RandomState(1001+(i*2)),
                     input=self.hiddenLayers[i].output,
-                    n_in=n_in,
-                    n_out=n_hidden
+                    n_in=n_in
                 )
             else:
                 self.scoreLayers[i] = ScoreLayer(
                     rng=numpy.random.RandomState(1001+(i*2)),
                     input=self.hiddenLayers[i].output,
                     n_in=n_in,
-                    n_out=n_hidden,
                     W=self.scoreLayers[0].W,
                     b=self.scoreLayers[0].b
                 )
@@ -328,13 +332,29 @@ class MLP(object):
 
         # the parameters of the model are the parameters of the two layer it is
         # made out of
-        self.params = [param for layer in self.hiddenLayers for param in layer.params] + self.scoreLayers[0].params
+        self.filterparams = [param for layer in self.hiddenLayers for param in layer.params] 
+        self.scoreparams = self.scoreLayers[0].params
         # end-snippet-3
 
         # keep track of model input
         self.input = input
 
         self.output = self.topLayer.output
+
+    def scoreerror(self,y):
+        errs = [layer.error(y) for layer in self.scoreLayers]
+        imgerrs = T.stack([t[0] for t in errs]).T
+        scoreerrs = T.concatenate([t[1] for t in errs],axis=1)
+
+        # if imgerrs.ndim != scoreerrs.ndim:
+        #     raise TypeError(
+        #         'imgerrs should have the same shape as scoreerrs',
+        #         ('imgerrs', imgerrs.ndim, 'scoreerrs', scoreerrs.ndim)
+        #     )
+
+        return T.sqrt(T.mean((imgerrs-scoreerrs)**2))
+
+
 
 
 def load_data(dataset):
@@ -466,7 +486,13 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # the cost we minimize during training is the negative log likelihood of
     # the model plus the regularization terms (L1 and L2); cost is expressed
     # here symbolically
-    cost = (
+    scorecost = (
+        classifier.scoreerror(y)
+        + L1_reg * classifier.L1
+        + L2_reg * classifier.L2_sqr
+    )
+
+    filtercost = (
         classifier.error(y)
         + L1_reg * classifier.L1
         + L2_reg * classifier.L2_sqr
@@ -496,7 +522,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # start-snippet-5
     # compute the gradient of cost with respect to theta (sorted in params)
     # the resulting gradients will be stored in a list gparams
-    gparams = [T.grad(cost, param,disconnected_inputs='ignore') for param in classifier.params]
+    filtergparams = [T.grad(filtercost, param) for param in classifier.filterparams]
+    scoregparams = [T.grad(scorecost, param) for param in classifier.scoreparams]
 
     # specify how to update the parameters of the model as a list of
     # (variable, update expression) pairs
@@ -505,18 +532,32 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # B = [b1, b2, b3, b4], zip generates a list C of same size, where each
     # element is a pair formed from the two lists :
     #    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
-    updates = [
+    filterupdates = [
         (param, param - learning_rate * gparam)
-        for param, gparam in zip(classifier.params, gparams)
+        for param, gparam in zip(classifier.filterparams, filtergparams)
+    ]
+    scoreupdates = [
+        (param, param - learning_rate * gparam)
+        for param, gparam in zip(classifier.scoreparams, scoregparams)
     ]
 
     # compiling a Theano function `train_model` that returns the cost, but
     # in the same time updates the parameter of the model based on the rules
     # defined in `updates`
-    train_model = theano.function(
+    train_filter = theano.function(
         inputs=[index],
-        outputs=cost,
-        updates=updates,
+        outputs=filtercost,
+        updates=filterupdates,
+        givens={
+            x: train_set_x[index * batch_size: (index + 1) * batch_size],
+            y: train_set_y[index * batch_size: (index + 1) * batch_size]
+        }
+    )
+
+    train_score = theano.function(
+        inputs=[index],
+        outputs=scorecost,
+        updates=scoreupdates,
         givens={
             x: train_set_x[index * batch_size: (index + 1) * batch_size],
             y: train_set_y[index * batch_size: (index + 1) * batch_size]
@@ -530,7 +571,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     print('... training')
 
     # early-stopping parameters
-    patience = 10000  # look as this many examples regardless
+    patience = 1000*n_train_batches  # look as this many examples regardless
     patience_increase = 2*n_train_batches  # wait this much longer when a new best is
                            # found
     improvement_threshold = 0.0005  # a relative improvement of this much is
@@ -559,7 +600,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
         epoch = epoch + 1
         for minibatch_index in range(n_train_batches):
 
-            minibatch_avg_cost = train_model(minibatch_index)
+            minibatch_avg_cost = train_score(minibatch_index)
+            minibatch_avg_cost = train_filter(minibatch_index)
             # iteration number
             iter = (epoch - 1) * n_train_batches + minibatch_index
 
@@ -661,4 +703,4 @@ def unjpeg(im,classifier):
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=1000,learning_rate=0.1,n_hidden=192,L2_reg=0.0001,paralayers=15)
+    test_mlp(n_epochs=1000, batch_size=1,learning_rate=0.01,n_hidden=192,L2_reg=0.0001,paralayers=5)
