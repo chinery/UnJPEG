@@ -64,6 +64,8 @@ from PIL import Image
 
 import theano
 import theano.tensor as T
+from theano import pp
+import theano.tensor.basic
 from theano.tensor import fft
 
 import pickle
@@ -115,9 +117,14 @@ class HiddenLayer(object):
         #        tanh.
         if W is None:
             W_values = numpy.asarray(
-                rng.uniform(
-                    low=-numpy.sqrt(6. / (n_in + n_out)),
-                    high=numpy.sqrt(6. / (n_in + n_out)),
+                # rng.uniform(
+                #     low=-numpy.sqrt(6. / (n_in + n_out)),
+                #     high=numpy.sqrt(6. / (n_in + n_out)),
+                #     size=(n_in, n_out)
+                # ),
+                rng.normal(
+                    loc=0,
+                    scale=numpy.sqrt(6/(n_in+n_out)),
                     size=(n_in, n_out)
                 ),
                 dtype=theano.config.floatX
@@ -143,12 +150,15 @@ class HiddenLayer(object):
         self.params = [self.W, self.b]
 
 # chin
-class VisibleLayer(HiddenLayer):
-    """ Attempting to add the error functions etc to the hidden layer
+class TopLayer(object):
+    """ Layer which just contains error functions
+        Has no maths, so the output will be the same dimensionality as the input
+        So make sure whatever is being passed in matches the dimensionality of the ground truth
     """
-    def __init__(self, rng, input, n_in, n_out, W=None, b=None,
-                 activation=T.tanh):
-        HiddenLayer.__init__(self,rng,input,n_in,n_out,W,b,activation)
+    def __init__(self, input):
+        self.input = input
+        self.output = input
+
 
     # def negative_log_likelihood(self, y):
     #     """Return the mean of the negative log-likelihood of the prediction
@@ -256,14 +266,8 @@ class MLP(object):
         #     activation=T.tanh
         # )
 
-        # The logistic regression layer gets as input the hidden units
-        # of the hidden layer
-        self.topLayer = VisibleLayer(
-            rng=rng,
-            input=self.hiddenLayer.output,
-            n_in=n_hidden,
-            n_out=n_out,
-            activation=T.tanh
+        self.topLayer = TopLayer(
+            input=self.poolLayer.output
         )
         # end-snippet-2 start-snippet-3
         # L1 norm ; one regularization option is to enforce L1 norm to
@@ -300,7 +304,7 @@ class MLP(object):
         self.output = self.topLayer.output
 
 
-def load_data(dataset):
+def load_data(dataset,m=0,s=1):
     ''' Loads the dataset
 
     :type dataset: string
@@ -321,6 +325,11 @@ def load_data(dataset):
         training_in = data['training_in']
         testing_gt = data['testing_gt']
         testing_in = data['testing_in']
+
+    training_gt = (training_gt-m)/s
+    training_in = (training_in-m)/s
+    testing_gt = (testing_gt-m)/s
+    testing_in = (testing_in-m)/s
 
     # # Load the dataset
     # with gzip.open(dataset, 'rb') as f:
@@ -392,7 +401,9 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 
 
    """
-    datasets = load_data(dataset)
+    m = 0
+    s = 1
+    datasets = load_data(dataset,m,s)
 
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
@@ -492,7 +503,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     print('... training')
 
     # early-stopping parameters
-    patience = 10000  # look as this many examples regardless
+    patience = 1000*n_train_batches  # look as this many examples regardless
     patience_increase = 2*n_train_batches  # wait this much longer when a new best is
                            # found
     improvement_threshold = 0.0005  # a relative improvement of this much is
@@ -545,7 +556,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                 with open('results/models/model{:04d}.pkl'.format(epoch), 'wb') as f:
                         pickle.dump(classifier, f)
 
-                cleanim = unjpeg(im,classifier)
+                cleanim = unjpeg(im,classifier,m,s)
                 res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
                 res.save('results/outimages/model{:04d}.png'.format(epoch))
 
@@ -587,7 +598,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
            ' ran for %.2fm' % ((end_time - start_time) / 60.)), file=sys.stderr)
 
 
-def unjpeg(im,classifier):
+def unjpeg(im,classifier,m=0,s=1):
     """
     Apply to an image
     """
@@ -613,12 +624,18 @@ def unjpeg(im,classifier):
     for i in range(0,math.ceil(h/8)):
         for j in range(0,math.ceil(w/8)):
             block = newim[i*8:(i+1)*8,j*8:(j+1)*8,:]
-            
+
+            block = (block-m)/s
+
             x_data = block.reshape((1,8*8*3))
 
             y_data = predict_model(x_data)
 
-            result[i*8:(i+1)*8,j*8:(j+1)*8,:] = y_data.reshape((8,8,3))
+            nblock = y_data.reshape((8,8,3))
+
+            nblock = (nblock*s)+m
+
+            result[i*8:(i+1)*8,j*8:(j+1)*8,:] = nblock
 
     return result[0:h,0:w,:]
 

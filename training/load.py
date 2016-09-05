@@ -57,18 +57,27 @@ for ix,imgpath in enumerate(images):
 			blockim.save(inmem,format='jpeg',quality=q,subsampling=ss)
 			jpegblock = scipy.misc.imread(inmem,mode='YCbCr')/255
 
-			# too many 'plain colour' patches, filter some/all
-			if numpy.sqrt(numpy.mean((jpegblock-block)**2)) < 0.01 and random.randint(0,3) != 3:
-				cskip += 1
-				if not testing:
-					trainix -= 1
-				continue
+
+
+			# block = (block-0.5)/0.2
+			# jpegblock = (jpegblock-0.5)/0.2
+
+			# for k in range(0,3):
+			# 	block[:,:,k] = numpy.divide((block[:,:,k]-0.5),0.2)
+			# 	jpegblock[:,:,k] = numpy.divide((jpegblock[:,:,k]-0.5),0.2)
+
+			# # too many 'plain colour' patches, filter some/all
+			# if numpy.sqrt(numpy.mean((jpegblock-block)**2)) < 0.01 and random.randint(0,3) != 3:
+			# 	cskip += 1
+			# 	if not testing:
+			# 		trainix -= 1
+			# 	continue
 
 			if count >= trainix:
 				testing = True
 				final = count
 				count = 0
-				print("\r{} training blocks".format(final))
+				print("\r{} training blocks{}".format(final,' '*50))
 
 			if not testing:
 				training_gt[count,:] = block.reshape((1,8*8*3))
