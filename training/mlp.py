@@ -122,11 +122,17 @@ class HiddenLayer(object):
                 #     high=numpy.sqrt(6. / (n_in + n_out)),
                 #     size=(n_in, n_out)
                 # ),
-                rng.normal(
-                    loc=0,
-                    scale=numpy.sqrt(6/(n_in+n_out)),
+                rng.uniform(
+                    low=-numpy.sqrt(1. / n_in),
+                    high=numpy.sqrt(1. / n_in),
                     size=(n_in, n_out)
                 ),
+                # rng.normal(
+                #     loc=0,
+                #     # scale=numpy.sqrt(6./(n_in+n_out)),
+                #     scale=numpy.sqrt(1./n_in),
+                #     size=(n_in, n_out)
+                # ),
                 dtype=theano.config.floatX
             )
             if activation == theano.tensor.nnet.sigmoid:
@@ -223,7 +229,7 @@ class MLP(object):
     class).
     """
 
-    def __init__(self, rng, input, n_in, n_hidden, n_out):
+    def __init__(self, rng, input, n_in, n_hidden, n_out, h_layers, activation=T.tanh):
         """Initialize the parameters for the multilayer perceptron
 
         :type rng: numpy.random.RandomState
@@ -246,17 +252,30 @@ class MLP(object):
 
         """
 
-        # Since we are dealing with a one hidden layer MLP, this will translate
-        # into a HiddenLayer with a tanh activation function connected to the
-        # LogisticRegression layer; the activation function can be replaced by
-        # sigmoid or any other nonlinear function
-        self.hiddenLayer = HiddenLayer(
+        self.hiddenLayers = [None]*(h_layers+1)
+        self.hiddenLayers[0] = HiddenLayer(
             rng=rng,
             input=input,
             n_in=n_in,
             n_out=n_hidden,
-            activation=T.tanh
+            activation=activation
         )
+        if h_layers > 1:
+            for i in range(1,h_layers):
+                self.hiddenLayers[i] = HiddenLayer(
+                    rng=rng,
+                    input=self.hiddenLayers[i-1].output,
+                    n_in=n_hidden,
+                    n_out=n_hidden,
+                    activation=activation
+                )
+        self.hiddenLayers[h_layers] = HiddenLayer(
+                rng=rng,
+                input=self.hiddenLayers[h_layers-1].output,
+                n_in=n_hidden,
+                n_out=n_out,
+                activation=activation
+            )
 
         # self.hiddenLayer2 = HiddenLayer(
         #     rng=rng,
@@ -267,21 +286,19 @@ class MLP(object):
         # )
 
         self.topLayer = TopLayer(
-            input=self.poolLayer.output
+            input=self.hiddenLayers[h_layers].output
         )
         # end-snippet-2 start-snippet-3
         # L1 norm ; one regularization option is to enforce L1 norm to
         # be small
         self.L1 = (
-            abs(self.hiddenLayer.W).sum() #+ abs(self.hiddenLayer2.W).sum()
-            + abs(self.topLayer.W).sum()
+            T.sum([abs(layer.W).sum() for layer in self.hiddenLayers])
         )
 
         # square of L2 norm ; one regularization option is to enforce
         # square of L2 norm to be small
         self.L2_sqr = (
-            (self.hiddenLayer.W ** 2).sum() #+ (self.hiddenLayer2.W ** 2).sum()
-            + (self.topLayer.W ** 2).sum()
+            T.sum([(layer.W ** 2).sum() for layer in self.hiddenLayers])
         )
 
         # negative log likelihood of the MLP is given by the negative
@@ -295,7 +312,7 @@ class MLP(object):
 
         # the parameters of the model are the parameters of the two layer it is
         # made out of
-        self.params = self.hiddenLayer.params + self.topLayer.params
+        self.params = [param for layer in self.hiddenLayers for param in layer.params]
         # end-snippet-3
 
         # keep track of model input
@@ -373,7 +390,7 @@ def load_data(dataset,m=0,s=1):
 
 
 def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
-             dataset='', batch_size=10000, n_hidden=500, classifier=None):
+             dataset='', batch_size=10000, n_hidden=500, classifier=None,h_layers=1,m=0,s=1):
     """
     Demonstrate stochastic gradient descent optimization for a multilayer
     perceptron
@@ -401,8 +418,6 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 
 
    """
-    m = 0
-    s = 1
     datasets = load_data(dataset,m,s)
 
     train_set_x, train_set_y = datasets[0]
@@ -426,14 +441,22 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 
     rng = numpy.random.RandomState(1234)
 
+    n_in = 8*8*3
+
     # construct the MLP class
     classifier = MLP(
         rng=rng,
         input=x,
-        n_in=8*8*3,
+        n_in=n_in,
         n_hidden=n_hidden,
-        n_out=8*8*3
+        n_out=n_in,
+        h_layers=h_layers,
+        activation=lambda x: 1.7159*T.tanh((2/3)*x)
     )
+
+    neurons_per_layer = [n_in] + [n_hidden]*h_layers + [n_in]
+    p_per_layer = (0,1) # total number of parameters per layer, 2: W and b
+    neurons_per_layer = [val for val in neurons_per_layer for _ in (0,1)]
 
     # start-snippet-4
     # the cost we minimize during training is the negative log likelihood of
@@ -479,8 +502,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # element is a pair formed from the two lists :
     #    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
     updates = [
-        (param, param - learning_rate * gparam)
-        for param, gparam in zip(classifier.params, gparams)
+        (param, param - (learning_rate/div) * gparam)
+        for param, gparam, div in zip(classifier.params, gparams, neurons_per_layer)
     ]
 
     # compiling a Theano function `train_model` that returns the cost, but
@@ -552,16 +575,17 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                     )
                 )
 
-                ## Save results and images
-                with open('results/models/model{:04d}.pkl'.format(epoch), 'wb') as f:
-                        pickle.dump(classifier, f)
-
-                cleanim = unjpeg(im,classifier,m,s)
-                res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
-                res.save('results/outimages/model{:04d}.png'.format(epoch))
 
                 # if we got the best validation score until now
                 if this_validation_loss < best_validation_loss:
+                    ## Save results and images
+                    with open('results/models/model{:04d}.pkl'.format(epoch), 'wb') as f:
+                            pickle.dump(classifier, f)
+
+                    cleanim = unjpeg(im,classifier,m,s)
+                    res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
+                    res.save('results/outimages/model{:04d}.png'.format(epoch))
+
                     #improve patience if loss improvement is good enough
                     if (
                         this_validation_loss < best_validation_loss *
@@ -569,18 +593,17 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                     ):
                         patience = max(patience, iter + patience_increase)
 
-                    best_validation_loss = this_validation_loss
-                    best_iter = iter
-
                     # test it on the test set
                     # test_losses = [test_model(i) for i
                     #                in range(n_test_batches)]
                     # test_score = numpy.mean(test_losses)
 
-                    print(('     epoch %i, minibatch %i/%i, test error of '
-                           'best model %f') %
+                    print(('     epoch %i, minibatch %i/%i, best error %f, improvement %f') %
                           (epoch, minibatch_index + 1, n_train_batches,
-                           best_validation_loss))
+                           this_validation_loss, this_validation_loss-best_validation_loss))
+
+                    best_validation_loss = this_validation_loss
+                    best_iter = iter
 
                     with open('best_model.pkl', 'wb') as f:
                         pickle.dump(classifier, f)
@@ -640,4 +663,4 @@ def unjpeg(im,classifier,m=0,s=1):
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=1000,learning_rate=0.1,n_hidden=384,L2_reg=0.0001)
+    test_mlp(n_epochs=1000, batch_size=100,learning_rate=0.1,n_hidden=1344,h_layers=2,L2_reg=0.0000,m=0.5,s=0.2)

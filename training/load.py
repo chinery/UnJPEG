@@ -5,6 +5,7 @@ import scipy, scipy.misc
 import math, random
 from PIL import Image
 import pickle
+import theano
 
 images = [entry for entry in os.scandir('./images/') if entry.is_file()]
 
@@ -24,10 +25,15 @@ print("Total of {} blocks".format(blocks))
 
 trainix = round(blocks*0.75)
 
-training_gt = numpy.zeros((trainix,8*8*3))
-testing_gt = numpy.zeros((blocks-trainix,8*8*3))
-training_in = numpy.zeros((trainix,8*8*3))
-testing_in = numpy.zeros((blocks-trainix,8*8*3))
+training_gt = numpy.zeros((trainix,8*8*3),dtype=theano.config.floatX)
+testing_gt = numpy.zeros((blocks-trainix,8*8*3),dtype=theano.config.floatX)
+training_in = numpy.zeros((trainix,8*8*3),dtype=theano.config.floatX)
+testing_in = numpy.zeros((blocks-trainix,8*8*3),dtype=theano.config.floatX)
+
+trainindices = numpy.arange(0,trainix)
+numpy.random.shuffle(trainindices)
+testindices = numpy.arange(0,blocks-trainix)
+numpy.random.shuffle(testindices)
 
 print("Computing JPEGs and storing blocks")
 count = 0
@@ -80,11 +86,11 @@ for ix,imgpath in enumerate(images):
 				print("\r{} training blocks{}".format(final,' '*50))
 
 			if not testing:
-				training_gt[count,:] = block.reshape((1,8*8*3))
-				training_in[count,:] = jpegblock.reshape((1,8*8*3))
+				training_gt[trainindices[count],:] = block.reshape((1,8*8*3))
+				training_in[trainindices[count],:] = jpegblock.reshape((1,8*8*3))
 			else:
-				testing_gt[count,:] = block.reshape((1,8*8*3))
-				testing_in[count,:] = jpegblock.reshape((1,8*8*3))
+				testing_gt[testindices[count],:] = block.reshape((1,8*8*3))
+				testing_in[testindices[count],:] = jpegblock.reshape((1,8*8*3))
 
 			count += 1
 
@@ -102,16 +108,17 @@ print("")
 print("{} testing blocks".format(count))
 print("{} blocks skipped".format(cskip))
 
-print("Shuffling")
-alltraining = numpy.concatenate([training_gt,training_in],axis=1)
-numpy.random.shuffle(alltraining)
-alltesting = numpy.concatenate([testing_gt,testing_in],axis=1)
-numpy.random.shuffle(alltesting)
+# Now done while storing
+# print("Shuffling")
+# alltraining = numpy.concatenate([training_gt,training_in],axis=1)
+# numpy.random.shuffle(alltraining)
+# alltesting = numpy.concatenate([testing_gt,testing_in],axis=1)
+# numpy.random.shuffle(alltesting)
 
-training_gt = alltraining[:,:8*8*3]
-training_in = alltraining[:,8*8*3:]
-testing_gt = alltesting[:,:8*8*3]
-testing_in = alltesting[:,8*8*3:]
+# training_gt = alltraining[:,:8*8*3]
+# training_in = alltraining[:,8*8*3:]
+# testing_gt = alltesting[:,:8*8*3]
+# testing_in = alltesting[:,8*8*3:]
 
 print("Saving data")
 
