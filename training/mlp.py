@@ -387,6 +387,18 @@ def shared_dataset(data_x, data_y, borrow=True):
     return shared_x, shared_y
 
 
+def findGPUlimit(data_x,data_y,min_n=1):
+    n = min_n
+    total = data_x.shape[0]
+    loop = True
+    while loop:
+        try:
+            dataset = shared_dataset(data_x[0:total//n,:],data_y[0:total//n,:])
+            loop = False
+        except MemoryError as e:
+            n = n + 1
+
+    return (dataset,n)
 
 
 def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
@@ -434,7 +446,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # no need for these to be the same, for validation want as big as will fit on gpu
     vbatch_size = num_of_samples//100
 
-    n_train_batches = train_set_x.shape[0] // batch_size
+    # n_train_batches = train_set_x.shape[0] // batch_size
     n_valid_batches = valid_set_x.shape[0] // vbatch_size
 
     # n_test_batches = test_set_x.get_value(borrow=True).shape[0] // batch_size
@@ -489,6 +501,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #         y: test_set_y[index * batch_size:(index + 1) * batch_size]
     #     }
     # )
+    (dataset,n_partitions) = findGPUlimit(train_set_x,train_set_y,1)
+    shared_x, shared_y = dataset
 
     batch_x = T.matrix()
     batch_y = T.matrix()
@@ -540,13 +554,23 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #         y: train_set_y[index * batch_size: (index + 1) * batch_size]
     #     }
     # )
+    # train_model = theano.function(
+    #     inputs=[batch_x,batch_y],
+    #     outputs=cost,
+    #     updates=updates,
+    #     givens={
+    #         x: batch_x,
+    #         y: batch_y
+    #     },
+    #     allow_input_downcast=True
+    # )
     train_model = theano.function(
-        inputs=[batch_x,batch_y],
+        inputs=[index],
         outputs=cost,
         updates=updates,
         givens={
-            x: batch_x,
-            y: batch_y
+            x: shared_x[index * batch_size: (index + 1) * batch_size],
+            y: shared_y[index * batch_size: (index + 1) * batch_size]
         },
         allow_input_downcast=True
     )
@@ -556,6 +580,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # TRAIN MODEL #
     ###############
     print('... training')
+    partition_size = num_of_samples//n_partitions
+    n_train_batches = partition_size//batch_size
 
     # early-stopping parameters
     patience = 50*n_train_batches  # look as this many examples regardless
@@ -563,12 +589,12 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                            # found
     improvement_threshold = 0.005  # a relative improvement of this much is
                                    # considered significant
-    validation_frequency = min(n_train_batches*2, patience // 2)
+    validation_frequency = min(n_train_batches*n_partitions, patience // 2)
                                   # go through this many
                                   # minibatche before checking the network
                                   # on the validation set; in this case we
                                   # check every epoch
-
+                                  
     best_validation_loss = numpy.inf
     best_iter = 0
     test_score = 0.
@@ -583,84 +609,103 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     im = scipy.misc.imread("test.jpg",mode='YCbCr')/255
 
     prob = numpy.ones(num_of_samples)/num_of_samples
+    p_weight = 1
+
+    """
+    Can't fit all data on GPU, sending small batches too slow, sending big batches not helping results
+    
+    So split data into n parts, determined by how much can fit
+    Take a sample of total/n examples, weighted by a probability vector
+    Put on GPU
+    Run training sequentially, updating corresponding entries in probability vector
+    When it reaches the end, take another total/n samples
+    Repeat n times
+    Call this one epoch (not guaranteed to hit all examples)
+
+    """
     while (epoch < n_epochs) and (not done_looping):
         epoch = epoch + 1
-        for minibatch_index in range(n_train_batches):  
-
-            sample = numpy.random.choice(num_of_samples, batch_size, False, prob)
-
-            # minibatch_avg_cost = train_model(minibatch_index)
-            minibatch_avg_cost = train_model(train_set_x[sample,:], train_set_y[sample,:])
-
-            # update probabilities
-            # want to incentivise picking different samples, but if the error is higher then
-            # return to this sample sooner
-            p_weight = 1
-            prob[sample] = prob[sample]*p_weight*minibatch_avg_cost
+        for partition_num in range(n_partitions):
             prob = prob/numpy.sum(prob)
+            partition_sample = numpy.random.choice(num_of_samples,partition_size,False,prob)
 
-            # iteration number
-            itr = (epoch - 1) * n_train_batches + minibatch_index
+            shared_x.set_value(numpy.asarray(train_set_x[partition_sample,:],dtype=theano.config.floatX))
+            shared_y.set_value(numpy.asarray(train_set_y[partition_sample,:],dtype=theano.config.floatX))
 
-            workdone = ((itr + 1) % validation_frequency)/validation_frequency
-            print("\rProgress: [{0:50s}] {1:.1f}%".format('#' * int(workdone * 50), workdone*100), end="", flush=True)
+            for index in range(n_train_batches):
 
-            if (itr + 1) % validation_frequency == 0:
-                print("")
-                # compute zero-one loss on validation set
-                # validation_losses = [validate_model(i) for i
-                #                      in range(n_valid_batches)]
-                validation_losses = [validate_model(valid_set_x[i * vbatch_size: (i + 1) * vbatch_size],
-                                                    valid_set_y[i * vbatch_size: (i + 1) * vbatch_size]) for i
-                                     in range(n_valid_batches)]                     
-                this_validation_loss = numpy.mean(validation_losses)
+                minibatch_avg_cost = train_model(index)
 
-                print(
-                    'epoch %i, minibatch %i/%i, validation error %f' %
-                    (
-                        epoch,
-                        minibatch_index + 1,
-                        n_train_batches,
-                        this_validation_loss
+
+                # update probabilities
+                # want to incentivise picking different samples, but if the error is higher then
+                # return to this sample sooner
+                prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
+
+                # iteration number
+                itr = (epoch - 1) * n_train_batches*n_partitions + (index*batch_size) + (partition_num*n_partitions)
+
+                workdone = ((itr + 1) % validation_frequency)/validation_frequency
+                print("\rProgress: [{0:50s}] {1:.1f}%".format('#' * int(workdone * 50), workdone*100), end="", flush=True)
+
+                if (itr + 1) % validation_frequency == 0:
+                    print("")
+                    # compute zero-one loss on validation set
+                    # validation_losses = [validate_model(i) for i
+                    #                      in range(n_valid_batches)]
+                    validation_losses = [validate_model(valid_set_x[i * vbatch_size: (i + 1) * vbatch_size],
+                                                        valid_set_y[i * vbatch_size: (i + 1) * vbatch_size]) for i
+                                         in range(n_valid_batches)]                     
+                    this_validation_loss = numpy.mean(validation_losses)
+
+                    print(
+                        'epoch %i, minibatch %i/%i, partition: %i/%i, validation error %f' %
+                        (
+                            epoch,
+                            index + 1,
+                            n_train_batches,
+                            partition_num,
+                            n_partitions,
+                            this_validation_loss
+                        )
                     )
-                )
 
 
-                # if we got the best validation score until now
-                if this_validation_loss < best_validation_loss:
-                    ## Save results and images
-                    with open('results/models/model{:04d}.pkl'.format(epoch), 'wb') as f:
+                    # if we got the best validation score until now
+                    if this_validation_loss < best_validation_loss:
+                        ## Save results and images
+                        with open('results/models/model{:04d}.pkl'.format(epoch), 'wb') as f:
+                                pickle.dump(classifier, f)
+
+                        cleanim = unjpeg(im,classifier,m,s)
+                        res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
+                        res.save('results/outimages/model{:04d}.png'.format(epoch))
+
+                        #improve patience if loss improvement is good enough
+                        if (
+                            this_validation_loss < best_validation_loss *
+                            (1-improvement_threshold)
+                        ):
+                            patience = max(patience, itr + patience_increase)
+
+                        # test it on the test set
+                        # test_losses = [test_model(i) for i
+                        #                in range(n_test_batches)]
+                        # test_score = numpy.mean(test_losses)
+
+                        print(('     epoch %i, best error %f, improvement %f') %
+                              (epoch, this_validation_loss, this_validation_loss-best_validation_loss))
+
+                        best_validation_loss = this_validation_loss
+                        best_iter = itr
+
+                        with open('best_model.pkl', 'wb') as f:
                             pickle.dump(classifier, f)
 
-                    cleanim = unjpeg(im,classifier,m,s)
-                    res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
-                    res.save('results/outimages/model{:04d}.png'.format(epoch))
+                if patience <= itr:
+                    done_looping = True
+                    break
 
-                    #improve patience if loss improvement is good enough
-                    if (
-                        this_validation_loss < best_validation_loss *
-                        (1-improvement_threshold)
-                    ):
-                        patience = max(patience, itr + patience_increase)
-
-                    # test it on the test set
-                    # test_losses = [test_model(i) for i
-                    #                in range(n_test_batches)]
-                    # test_score = numpy.mean(test_losses)
-
-                    print(('     epoch %i, minibatch %i/%i, best error %f, improvement %f') %
-                          (epoch, minibatch_index + 1, n_train_batches,
-                           this_validation_loss, this_validation_loss-best_validation_loss))
-
-                    best_validation_loss = this_validation_loss
-                    best_iter = itr
-
-                    with open('best_model.pkl', 'wb') as f:
-                        pickle.dump(classifier, f)
-
-            if patience <= itr:
-                done_looping = True
-                break
 
     end_time = timeit.default_timer()
     print(('Optimization complete. Best validation score of %f %% '
