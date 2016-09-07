@@ -382,6 +382,8 @@ def load_data(dataset,m=0,s=1):
     train_set_x, train_set_y = shared_dataset(training_in, training_gt)
     valid_set_x, valid_set_y = shared_dataset(testing_in, testing_gt)
 
+    # train_set_x, train_set_y, valid_set_x, valid_set_y = training_in, training_gt, testing_in, testing_gt
+
     rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y)]
     return rval
 
@@ -425,8 +427,12 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # test_set_x, test_set_y = datasets[2]
 
     # compute number of minibatches for training, validation and testing
-    n_train_batches = train_set_x.get_value(borrow=True).shape[0] // batch_size
-    n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] // batch_size
+    # n_train_batches = train_set_x.get_value(borrow=True).shape[0] // batch_size
+    # n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] // batch_size
+    
+    n_train_batches = train_set_x.shape[0] // batch_size
+    n_valid_batches = valid_set_x.shape[0] // batch_size
+
     # n_test_batches = test_set_x.get_value(borrow=True).shape[0] // batch_size
 
     ######################
@@ -455,7 +461,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     )
 
     neurons_per_layer = [n_in] + [n_hidden]*h_layers + [n_in]
-    p_per_layer = (0,1) # total number of parameters per layer, 2: W and b
+    p_per_layer = (0,1) # a number for each parameters per layer, 2: W and b
     neurons_per_layer = [val for val in neurons_per_layer for _ in (0,1)]
 
     # start-snippet-4
@@ -480,6 +486,9 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #     }
     # )
 
+    batch_x = T.matrix()
+    batch_y = T.matrix()
+
     validate_model = theano.function(
         inputs=[index],
         outputs=classifier.error(y),
@@ -488,6 +497,15 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
             y: valid_set_y[index * batch_size:(index + 1) * batch_size]
         }
     )
+    # validate_model = theano.function(
+    #     inputs=[batch_x,batch_y],
+    #     outputs=classifier.error(y),
+    #     givens={
+    #         x: batch_x,
+    #         y: batch_y
+    #     },
+    #     allow_input_downcast=True
+    # )
 
     # start-snippet-5
     # compute the gradient of cost with respect to theta (sorted in params)
@@ -518,6 +536,16 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
             y: train_set_y[index * batch_size: (index + 1) * batch_size]
         }
     )
+    # train_model = theano.function(
+    #     inputs=[batch_x,batch_y],
+    #     outputs=cost,
+    #     updates=updates,
+    #     givens={
+    #         x: batch_x,
+    #         y: batch_y
+    #     },
+    #     allow_input_downcast=True
+    # )
     # end-snippet-5
 
     ###############
@@ -556,6 +584,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
         for minibatch_index in range(n_train_batches):
 
             minibatch_avg_cost = train_model(minibatch_index)
+            # minibatch_avg_cost = train_model(train_set_x[minibatch_index * batch_size: (minibatch_index + 1) * batch_size],
+            #                                  train_set_y[minibatch_index * batch_size: (minibatch_index + 1) * batch_size])
             # iteration number
             iter = (epoch - 1) * n_train_batches + minibatch_index
 
@@ -563,6 +593,9 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                 # compute zero-one loss on validation set
                 validation_losses = [validate_model(i) for i
                                      in range(n_valid_batches)]
+                # validation_losses = [validate_model(valid_set_x[i * batch_size: (i + 1) * batch_size],
+                #                                     valid_set_y[i * batch_size: (i + 1) * batch_size]) for i
+                #                      in range(n_valid_batches)]                     
                 this_validation_loss = numpy.mean(validation_losses)
 
                 print(
@@ -663,4 +696,4 @@ def unjpeg(im,classifier,m=0,s=1):
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=100,learning_rate=0.1,n_hidden=1344,h_layers=2,L2_reg=0.0000,m=0.5,s=0.2)
+    test_mlp(n_epochs=1000, batch_size=100,learning_rate=20,n_hidden=2047,h_layers=4,L2_reg=0.0000,m=0.5,s=0.2)
