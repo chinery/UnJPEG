@@ -379,10 +379,10 @@ def load_data(dataset,m=0,s=1):
         return shared_x, shared_y
 
 
-    train_set_x, train_set_y = shared_dataset(training_in, training_gt)
-    valid_set_x, valid_set_y = shared_dataset(testing_in, testing_gt)
+    # train_set_x, train_set_y = shared_dataset(training_in, training_gt)
+    # valid_set_x, valid_set_y = shared_dataset(testing_in, testing_gt)
 
-    # train_set_x, train_set_y, valid_set_x, valid_set_y = training_in, training_gt, testing_in, testing_gt
+    train_set_x, train_set_y, valid_set_x, valid_set_y = training_in, training_gt, testing_in, testing_gt
 
     rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y)]
     return rval
@@ -426,12 +426,18 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     valid_set_x, valid_set_y = datasets[1]
     # test_set_x, test_set_y = datasets[2]
 
+    num_of_samples = train_set_x.shape[0]
+    
+
     # compute number of minibatches for training, validation and testing
     # n_train_batches = train_set_x.get_value(borrow=True).shape[0] // batch_size
     # n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] // batch_size
-    
+
+    # no need for these to be the same, for validation want as big as will fit on gpu
+    vbatch_size = num_of_samples//100
+
     n_train_batches = train_set_x.shape[0] // batch_size
-    n_valid_batches = valid_set_x.shape[0] // batch_size
+    n_valid_batches = valid_set_x.shape[0] // vbatch_size
 
     # n_test_batches = test_set_x.get_value(borrow=True).shape[0] // batch_size
 
@@ -489,23 +495,23 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     batch_x = T.matrix()
     batch_y = T.matrix()
 
-    validate_model = theano.function(
-        inputs=[index],
-        outputs=classifier.error(y),
-        givens={
-            x: valid_set_x[index * batch_size:(index + 1) * batch_size],
-            y: valid_set_y[index * batch_size:(index + 1) * batch_size]
-        }
-    )
     # validate_model = theano.function(
-    #     inputs=[batch_x,batch_y],
+    #     inputs=[index],
     #     outputs=classifier.error(y),
     #     givens={
-    #         x: batch_x,
-    #         y: batch_y
-    #     },
-    #     allow_input_downcast=True
+    #         x: valid_set_x[index * batch_size:(index + 1) * batch_size],
+    #         y: valid_set_y[index * batch_size:(index + 1) * batch_size]
+    #     }
     # )
+    validate_model = theano.function(
+        inputs=[batch_x,batch_y],
+        outputs=classifier.error(y),
+        givens={
+            x: batch_x,
+            y: batch_y
+        },
+        allow_input_downcast=True
+    )
 
     # start-snippet-5
     # compute the gradient of cost with respect to theta (sorted in params)
@@ -527,25 +533,25 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # compiling a Theano function `train_model` that returns the cost, but
     # in the same time updates the parameter of the model based on the rules
     # defined in `updates`
-    train_model = theano.function(
-        inputs=[index],
-        outputs=cost,
-        updates=updates,
-        givens={
-            x: train_set_x[index * batch_size: (index + 1) * batch_size],
-            y: train_set_y[index * batch_size: (index + 1) * batch_size]
-        }
-    )
     # train_model = theano.function(
-    #     inputs=[batch_x,batch_y],
+    #     inputs=[index],
     #     outputs=cost,
     #     updates=updates,
     #     givens={
-    #         x: batch_x,
-    #         y: batch_y
-    #     },
-    #     allow_input_downcast=True
+    #         x: train_set_x[index * batch_size: (index + 1) * batch_size],
+    #         y: train_set_y[index * batch_size: (index + 1) * batch_size]
+    #     }
     # )
+    train_model = theano.function(
+        inputs=[batch_x,batch_y],
+        outputs=cost,
+        updates=updates,
+        givens={
+            x: batch_x,
+            y: batch_y
+        },
+        allow_input_downcast=True
+    )
     # end-snippet-5
 
     ###############
@@ -554,7 +560,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     print('... training')
 
     # early-stopping parameters
-    patience = 1000*n_train_batches  # look as this many examples regardless
+    patience = 50*n_train_batches  # look as this many examples regardless
     patience_increase = 2*n_train_batches  # wait this much longer when a new best is
                            # found
     improvement_threshold = 0.0005  # a relative improvement of this much is
@@ -578,24 +584,33 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #####
     im = scipy.misc.imread("test.jpg",mode='YCbCr')/255
 
-
+    prob = numpy.ones(num_of_samples)/num_of_samples
     while (epoch < n_epochs) and (not done_looping):
         epoch = epoch + 1
-        for minibatch_index in range(n_train_batches):
+        for minibatch_index in range(n_train_batches):  
 
-            minibatch_avg_cost = train_model(minibatch_index)
-            # minibatch_avg_cost = train_model(train_set_x[minibatch_index * batch_size: (minibatch_index + 1) * batch_size],
-            #                                  train_set_y[minibatch_index * batch_size: (minibatch_index + 1) * batch_size])
+            sample = numpy.random.choice(num_of_samples, batch_size, False, prob)
+
+            # minibatch_avg_cost = train_model(minibatch_index)
+            minibatch_avg_cost = train_model(train_set_x[sample], train_set_y[sample])
+
+            # update probabilities
+            # want to incentivise picking different samples, but if the error is higher then
+            # return to this sample sooner
+            p_weight = 1
+            prob[sample] = prob[sample]*p_weight*minibatch_avg_cost
+            prob = prob/numpy.sum(prob)
+
             # iteration number
             iter = (epoch - 1) * n_train_batches + minibatch_index
 
             if (iter + 1) % validation_frequency == 0:
                 # compute zero-one loss on validation set
-                validation_losses = [validate_model(i) for i
-                                     in range(n_valid_batches)]
-                # validation_losses = [validate_model(valid_set_x[i * batch_size: (i + 1) * batch_size],
-                #                                     valid_set_y[i * batch_size: (i + 1) * batch_size]) for i
-                #                      in range(n_valid_batches)]                     
+                # validation_losses = [validate_model(i) for i
+                #                      in range(n_valid_batches)]
+                validation_losses = [validate_model(valid_set_x[i * vbatch_size: (i + 1) * vbatch_size],
+                                                    valid_set_y[i * vbatch_size: (i + 1) * vbatch_size]) for i
+                                     in range(n_valid_batches)]                     
                 this_validation_loss = numpy.mean(validation_losses)
 
                 print(
