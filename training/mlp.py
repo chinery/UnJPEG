@@ -361,24 +361,6 @@ def load_data(dataset,m=0,s=1):
     # # the number of rows in the input. It should give the target
     # # to the example with the same index in the input.
 
-    def shared_dataset(data_x, data_y, borrow=True):
-        """ Function that loads the dataset into shared variables
-
-        The reason we store our dataset in shared variables is to allow
-        Theano to copy it into the GPU memory (when code is run on GPU).
-        Since copying data into the GPU is slow, copying a minibatch everytime
-        is needed (the default behaviour if the data is not in a shared
-        variable) would lead to a large decrease in performance.
-        """
-        shared_x = theano.shared(numpy.asarray(data_x,
-                                               dtype=theano.config.floatX),
-                                 borrow=borrow)
-        shared_y = theano.shared(numpy.asarray(data_y,
-                                               dtype=theano.config.floatX),
-                                 borrow=borrow)
-        return shared_x, shared_y
-
-
     # train_set_x, train_set_y = shared_dataset(training_in, training_gt)
     # valid_set_x, valid_set_y = shared_dataset(testing_in, testing_gt)
 
@@ -387,6 +369,22 @@ def load_data(dataset,m=0,s=1):
     rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y)]
     return rval
 
+def shared_dataset(data_x, data_y, borrow=True):
+    """ Function that loads the dataset into shared variables
+
+    The reason we store our dataset in shared variables is to allow
+    Theano to copy it into the GPU memory (when code is run on GPU).
+    Since copying data into the GPU is slow, copying a minibatch everytime
+    is needed (the default behaviour if the data is not in a shared
+    variable) would lead to a large decrease in performance.
+    """
+    shared_x = theano.shared(numpy.asarray(data_x,
+                                           dtype=theano.config.floatX),
+                             borrow=borrow)
+    shared_y = theano.shared(numpy.asarray(data_y,
+                                           dtype=theano.config.floatX),
+                             borrow=borrow)
+    return shared_x, shared_y
 
 
 
@@ -563,9 +561,9 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     patience = 50*n_train_batches  # look as this many examples regardless
     patience_increase = 2*n_train_batches  # wait this much longer when a new best is
                            # found
-    improvement_threshold = 0.0005  # a relative improvement of this much is
+    improvement_threshold = 0.005  # a relative improvement of this much is
                                    # considered significant
-    validation_frequency = min(n_train_batches, patience // 2)
+    validation_frequency = min(n_train_batches*2, patience // 2)
                                   # go through this many
                                   # minibatche before checking the network
                                   # on the validation set; in this case we
@@ -592,7 +590,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
             sample = numpy.random.choice(num_of_samples, batch_size, False, prob)
 
             # minibatch_avg_cost = train_model(minibatch_index)
-            minibatch_avg_cost = train_model(train_set_x[sample], train_set_y[sample])
+            minibatch_avg_cost = train_model(train_set_x[sample,:], train_set_y[sample,:])
 
             # update probabilities
             # want to incentivise picking different samples, but if the error is higher then
@@ -602,9 +600,13 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
             prob = prob/numpy.sum(prob)
 
             # iteration number
-            iter = (epoch - 1) * n_train_batches + minibatch_index
+            itr = (epoch - 1) * n_train_batches + minibatch_index
 
-            if (iter + 1) % validation_frequency == 0:
+            workdone = ((itr + 1) % validation_frequency)/validation_frequency
+            print("\rProgress: [{0:50s}] {1:.1f}%".format('#' * int(workdone * 50), workdone*100), end="", flush=True)
+
+            if (itr + 1) % validation_frequency == 0:
+                print("")
                 # compute zero-one loss on validation set
                 # validation_losses = [validate_model(i) for i
                 #                      in range(n_valid_batches)]
@@ -639,7 +641,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                         this_validation_loss < best_validation_loss *
                         (1-improvement_threshold)
                     ):
-                        patience = max(patience, iter + patience_increase)
+                        patience = max(patience, itr + patience_increase)
 
                     # test it on the test set
                     # test_losses = [test_model(i) for i
@@ -651,12 +653,12 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                            this_validation_loss, this_validation_loss-best_validation_loss))
 
                     best_validation_loss = this_validation_loss
-                    best_iter = iter
+                    best_iter = itr
 
                     with open('best_model.pkl', 'wb') as f:
                         pickle.dump(classifier, f)
 
-            if patience <= iter:
+            if patience <= itr:
                 done_looping = True
                 break
 
@@ -711,4 +713,4 @@ def unjpeg(im,classifier,m=0,s=1):
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=100,learning_rate=20,n_hidden=2047,h_layers=4,L2_reg=0.0000,m=0.5,s=0.2)
+    test_mlp(n_epochs=1000, batch_size=2,learning_rate=20,n_hidden=2047,h_layers=4,L2_reg=0.0000,m=0.5,s=0.2)
