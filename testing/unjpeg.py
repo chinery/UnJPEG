@@ -15,7 +15,7 @@ import pickle
 
 import sys
 sys.path.append('../training/')
-from mlp import MLP, TopLayer, HiddenLayer, PoolLayer, unjpeg
+from mlp import MLP, TopLayer, HiddenLayer, unjpeg
 
 
 # def unjpeg(im):
@@ -58,9 +58,9 @@ if __name__ == '__main__':
     with open('best_model.pkl', 'rb') as f:
         classifier = pickle.load(f)
 
-    im = scipy.misc.imread("test.jpg",mode='YCbCr')/255
+    im = scipy.misc.imread("test2.jpg",mode='YCbCr')/255
 
-    cleanim = unjpeg(im,classifier)
+    cleanim = unjpeg(im,classifier,0.5,0.2)
 
     res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
-    res.save('result.png')
+    res.save('result2.png')
