@@ -596,6 +596,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                                   # check every epoch
                                   
     best_validation_loss = numpy.inf
+    itr = 0
     best_iter = 0
     test_score = 0.
     start_time = timeit.default_timer()
@@ -643,10 +644,11 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                 prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
 
                 # iteration number
-                itr = (epoch - 1) * n_train_batches*n_partitions + (index*batch_size) + (partition_num*n_partitions)
+                # itr = (epoch - 1) * n_train_batches*n_partitions + partition_num + (index*batch_size) 
+                itr = itr + 1
 
                 workdone = ((itr + 1) % validation_frequency)/validation_frequency
-                print("\rProgress: [{0:50s}] {1:.1f}%".format('#' * int(workdone * 50), workdone*100), end="", flush=True)
+                print("\rProgress: [{0:10s}] {1:.1f}% epoch: {2} partition: {3}/{4} batch:{5}/{6} ".format('#' * int(workdone * 10), workdone*100, epoch, partition_num, n_partitions, index, n_train_batches), end="", flush=True)
 
                 if (itr + 1) % validation_frequency == 0:
                     print("")
