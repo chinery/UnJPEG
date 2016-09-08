@@ -501,7 +501,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #         y: test_set_y[index * batch_size:(index + 1) * batch_size]
     #     }
     # )
-    (dataset,n_partitions) = findGPUlimit(train_set_x,train_set_y,1)
+    (dataset,n_partitions) = findGPUlimit(train_set_x,train_set_y,3)
     shared_x, shared_y = dataset
 
     batch_x = T.matrix()
@@ -564,13 +564,14 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #     },
     #     allow_input_downcast=True
     # )
+    allindex = T.ivector()
     train_model = theano.function(
-        inputs=[index],
+        inputs=[allindex],
         outputs=cost,
         updates=updates,
         givens={
-            x: shared_x[index * batch_size: (index + 1) * batch_size],
-            y: shared_y[index * batch_size: (index + 1) * batch_size]
+            x: shared_x[allindex,:],
+            y: shared_y[allindex,:]
         },
         allow_input_downcast=True
     )
@@ -610,7 +611,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     im = scipy.misc.imread("test.jpg",mode='YCbCr')/255
 
     prob = numpy.ones(num_of_samples)/num_of_samples
-    p_weight = 1
+    p_weight = 2
 
     """
     Can't fit all data on GPU, sending small batches too slow, sending big batches not helping results
@@ -628,27 +629,37 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
         epoch = epoch + 1
         for partition_num in range(n_partitions):
             prob = prob/numpy.sum(prob)
-            partition_sample = numpy.random.choice(num_of_samples,partition_size,False,prob)
+
+            kth = num_of_samples-partition_size
+            partition_sample = numpy.argpartition(prob,kth)[kth:]
+            prob_partition = prob[partition_sample]
+            ppsum = numpy.sum(prob_partition)
+
+            # partition_sample = numpy.random.choice(num_of_samples,partition_size,False,prob)
 
             shared_x.set_value(numpy.asarray(train_set_x[partition_sample,:],dtype=theano.config.floatX))
             shared_y.set_value(numpy.asarray(train_set_y[partition_sample,:],dtype=theano.config.floatX))
 
             for index in range(n_train_batches):
+                prob_partition = prob_partition/numpy.sum(prob_partition)
+                innersample = numpy.random.choice(partition_size,batch_size,False,prob_partition)
 
-                minibatch_avg_cost = train_model(index)
-
+                minibatch_avg_cost = train_model(innersample)
 
                 # update probabilities
                 # want to incentivise picking different samples, but if the error is higher then
                 # return to this sample sooner
-                prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
+                prob_partition[innersample] = prob_partition[innersample]*p_weight*minibatch_avg_cost
+                prob[partition_sample[innersample]]=prob[partition_sample[innersample]]*p_weight*minibatch_avg_cost
+                # prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
 
                 # iteration number
                 # itr = (epoch - 1) * n_train_batches*n_partitions + partition_num + (index*batch_size) 
                 itr = itr + 1
 
                 workdone = ((itr + 1) % validation_frequency)/validation_frequency
-                print("\rProgress: [{0:10s}] {1:.1f}% epoch: {2} partition: {3}/{4} batch:{5}/{6} ".format('#' * int(workdone * 10), workdone*100, epoch, partition_num, n_partitions, index, n_train_batches), end="", flush=True)
+                if(itr%100 == 0):
+                    print("\rProgress: [{0:10s}] {1:.1f}% epoch: {2} partition: {3}/{4} batch:{5}/{6} ".format('#' * int(workdone * 10), workdone*100, epoch+1, partition_num+1, n_partitions, index+1, n_train_batches), end="", flush=True)
 
                 if (itr + 1) % validation_frequency == 0:
                     print("")
