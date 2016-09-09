@@ -641,7 +641,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
             shared_y.set_value(numpy.asarray(train_set_y[partition_sample,:],dtype=theano.config.floatX))
 
             for index in range(n_train_batches):
-                prob_partition = prob_partition/numpy.sum(prob_partition)
+                prob_partition= prob_partition/numpy.sum(prob_partition)
                 innersample = numpy.random.choice(partition_size,batch_size,False,prob_partition)
 
                 minibatch_avg_cost = train_model(innersample)
@@ -649,8 +649,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                 # update probabilities
                 # want to incentivise picking different samples, but if the error is higher then
                 # return to this sample sooner
-                prob_partition[innersample] = prob_partition[innersample]*p_weight*minibatch_avg_cost
-                prob[partition_sample[innersample]]=prob[partition_sample[innersample]]*p_weight*minibatch_avg_cost
+                prob_partition[innersample] = numpy.clip(prob_partition[innersample]*p_weight*minibatch_avg_cost,0.0001,1)
+                prob[partition_sample[innersample]] = numpy.clip(prob[partition_sample[innersample]]*p_weight*minibatch_avg_cost,0.0001,1)
                 # prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
 
                 # iteration number
@@ -659,7 +659,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 
                 workdone = ((itr + 1) % validation_frequency)/validation_frequency
                 if(itr%100 == 0):
-                    print("\rProgress: [{0:10s}] {1:.1f}% epoch: {2} partition: {3}/{4} batch:{5}/{6} ".format('#' * int(workdone * 10), workdone*100, epoch+1, partition_num+1, n_partitions, index+1, n_train_batches), end="", flush=True)
+                    print("\rProgress: [{0:10s}] {1:.1f}% epoch: {2} partition: {3}/{4} batch:{5}/{6} ".format('#' * int(workdone * 10), workdone*100, epoch, partition_num+1, n_partitions, index+1, n_train_batches), end="", flush=True)
 
                 if (itr + 1) % validation_frequency == 0:
                     print("")
@@ -771,4 +771,4 @@ def unjpeg(im,classifier,m=0,s=1):
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=2,learning_rate=20,n_hidden=2047,h_layers=4,L2_reg=0.0000,m=0.5,s=0.2)
+    test_mlp(n_epochs=1000, batch_size=100,learning_rate=20,n_hidden=2047,h_layers=4,L2_reg=0.0000,m=0.58,s=0.28)
