@@ -437,6 +437,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # test_set_x, test_set_y = datasets[2]
 
     num_of_samples = train_set_x.shape[0]
+    num_of_vsamples = valid_set_x.shape[0]
     
 
     # compute number of minibatches for training, validation and testing
@@ -444,7 +445,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] // batch_size
 
     # no need for these to be the same, for validation want as big as will fit on gpu
-    vbatch_size = num_of_samples//100
+    vbatch_size = num_of_vsamples//1000
 
     # n_train_batches = train_set_x.shape[0] // batch_size
     n_valid_batches = valid_set_x.shape[0] // vbatch_size
@@ -501,7 +502,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #         y: test_set_y[index * batch_size:(index + 1) * batch_size]
     #     }
     # )
-    (dataset,n_partitions) = findGPUlimit(train_set_x,train_set_y,3)
+    (dataset,n_partitions) = findGPUlimit(train_set_x,train_set_y,8)
     shared_x, shared_y = dataset
 
     batch_x = T.matrix()
@@ -585,10 +586,10 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     n_train_batches = partition_size//batch_size
 
     # early-stopping parameters
-    patience = 50*n_train_batches  # look as this many examples regardless
-    patience_increase = 2*n_train_batches  # wait this much longer when a new best is
+    patience = 50*n_train_batches*n_partitions  # look as this many examples regardless
+    patience_increase = 1*n_train_batches*n_partitions  # wait this much longer when a new best is
                            # found
-    improvement_threshold = 0.005  # a relative improvement of this much is
+    improvement_threshold = 0.001  # a relative improvement of this much is
                                    # considered significant
     validation_frequency = min(n_train_batches*n_partitions, patience // 2)
                                   # go through this many
@@ -625,33 +626,43 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     Call this one epoch (not guaranteed to hit all examples)
 
     """
+    validation_losses = [validate_model(valid_set_x[i * vbatch_size: (i + 1) * vbatch_size],
+                                                        valid_set_y[i * vbatch_size: (i + 1) * vbatch_size]) for i
+                                         in range(n_valid_batches)]                     
+    this_validation_loss = numpy.mean(validation_losses)
+    sampleorder = numpy.arange(0,num_of_samples)
     while (epoch < n_epochs) and (not done_looping):
         epoch = epoch + 1
+        numpy.random.shuffle(sampleorder)
         for partition_num in range(n_partitions):
-            prob = prob/numpy.sum(prob)
 
-            kth = num_of_samples-partition_size
-            partition_sample = numpy.argpartition(prob,kth)[kth:]
-            prob_partition = prob[partition_sample]
-            ppsum = numpy.sum(prob_partition)
+            # # sample the k entries with the highest probability
+            # prob = prob/numpy.sum(prob)
+            # kth = num_of_samples-partition_size
+            # partition_sample = numpy.argpartition(prob,kth)[kth:]
+            # prob_partition = prob[partition_sample]
+            # ppsum = numpy.sum(prob_partition)
 
-            # partition_sample = numpy.random.choice(num_of_samples,partition_size,False,prob)
+            # non-probabilistic version
+            partition_sample = sampleorder[partition_num * partition_size : (partition_num+1) * partition_size]            
 
             shared_x.set_value(numpy.asarray(train_set_x[partition_sample,:],dtype=theano.config.floatX))
             shared_y.set_value(numpy.asarray(train_set_y[partition_sample,:],dtype=theano.config.floatX))
 
             for index in range(n_train_batches):
-                prob_partition= prob_partition/numpy.sum(prob_partition)
-                innersample = numpy.random.choice(partition_size,batch_size,False,prob_partition)
+                # # probabilistic version
+                # prob_partition= prob_partition/numpy.sum(prob_partition)
+                # innersample = numpy.random.choice(partition_size,batch_size,False,prob_partition)
+                # minibatch_avg_cost = train_model(innersample)
+                # # update probabilities
+                # # want to incentivise picking different samples, but if the error is higher then
+                # # return to this sample sooner
+                # prob_partition[innersample] = numpy.clip(prob_partition[innersample]*p_weight*minibatch_avg_cost,0.0001,1)
+                # prob[partition_sample[innersample]] = numpy.clip(prob[partition_sample[innersample]]*p_weight*minibatch_avg_cost,0.0001,1)
+                # # prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
 
-                minibatch_avg_cost = train_model(innersample)
-
-                # update probabilities
-                # want to incentivise picking different samples, but if the error is higher then
-                # return to this sample sooner
-                prob_partition[innersample] = numpy.clip(prob_partition[innersample]*p_weight*minibatch_avg_cost,0.0001,1)
-                prob[partition_sample[innersample]] = numpy.clip(prob[partition_sample[innersample]]*p_weight*minibatch_avg_cost,0.0001,1)
-                # prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
+                # non probabilistic version
+                minibatch_avg_cost = train_model(numpy.arange(index*batch_size,(index+1)*batch_size))
 
                 # iteration number
                 # itr = (epoch - 1) * n_train_batches*n_partitions + partition_num + (index*batch_size) 

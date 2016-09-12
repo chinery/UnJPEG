@@ -58,9 +58,11 @@ for ix,imgpath in enumerate(images):
 			
 			blockim = Image.fromarray(numpy.uint8(block*255),mode='YCbCr')
 			inmem = io.BytesIO()
-			q = random.randint(25,75)
-			ss = random.randint(0,2)
-			blockim.save(inmem,format='jpeg',quality=q,subsampling=ss)
+			# q = random.randint(25,75)
+			# ss = random.randint(0,2)
+			# blockim.save(inmem,format='jpeg',quality=q,subsampling=ss)
+			# these are twitter's settings
+			blockim.save(inmem,format='jpeg',quality=85,subsampling=2,progressive=1)
 			jpegblock = scipy.misc.imread(inmem,mode='YCbCr')/255
 
 
@@ -107,6 +109,7 @@ if cskip != 0:
 print("")
 print("{} testing blocks".format(count))
 print("{} blocks skipped".format(cskip))
+
 
 # Now done while storing
 # print("Shuffling")

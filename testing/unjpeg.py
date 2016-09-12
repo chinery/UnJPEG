@@ -59,9 +59,9 @@ if __name__ == '__main__':
         classifier = pickle.load(f)
 
     # im = scipy.misc.imread("test2.jpg",mode='YCbCr')/255
-    im = scipy.misc.imread("jpeg.png",mode='YCbCr')/255
+    im = scipy.misc.imread("test2.jpg",mode='YCbCr')/255
 
-    cleanim = unjpeg(im,classifier,0.5,0.2)
+    cleanim = unjpeg(im,classifier,0.58,0.28)
 
     res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
-    res.save('unjpeg.png')
+    res.save('test2.png')
