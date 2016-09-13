@@ -18,10 +18,6 @@ Log:
 http://deeplearning.net/tutorial/mlp.html  
 * Tweaked to change output from a single integer (classification) to the same size as the input (8x8x3 blocks, the same size jpeg uses)
 
-Plans:
-* Look into denoising literature to see if there is a better error measure that better preserves high frequencies than MSE
-* Try the layer/pooling technique from a CNN
-
 [1] http://www.hcburger.com/files/neuraldenoising.pdf
 
 [2] http://yann.lecun.com/exdb/publis/pdf/lecun-98b.pdf
