@@ -333,7 +333,7 @@ def load_data(dataset,m=0,s=1):
     #############
     print('... loading data')
 
-    with numpy.load('data.pickle', 'rb') as data:
+    with numpy.load('1616data.pickle', 'rb') as data:
         # training_gt = data['arr_0']
         # training_in = data['arr_1']
         # testing_gt = data['arr_2']
@@ -342,6 +342,9 @@ def load_data(dataset,m=0,s=1):
         training_in = data['training_in']
         testing_gt = data['testing_gt']
         testing_in = data['testing_in']
+		
+    print(numpy.mean(training_in))
+    print(numpy.sqrt(numpy.var(training_in)))
 
     training_gt = (training_gt-m)/s
     training_in = (training_in-m)/s
@@ -364,9 +367,9 @@ def load_data(dataset,m=0,s=1):
     # train_set_x, train_set_y = shared_dataset(training_in, training_gt)
     # valid_set_x, valid_set_y = shared_dataset(testing_in, testing_gt)
 
-    train_set_x, train_set_y, valid_set_x, valid_set_y = training_in, training_gt, testing_in, testing_gt
+    # train_set_x, train_set_y, valid_set_x, valid_set_y = training_in, training_gt, testing_in, testing_gt
 
-    rval = [(train_set_x, train_set_y), (valid_set_x, valid_set_y)]
+    rval = [(training_in, training_gt), (testing_in, testing_gt)]
     return rval
 
 def shared_dataset(data_x, data_y, borrow=True):
@@ -445,7 +448,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] // batch_size
 
     # no need for these to be the same, for validation want as big as will fit on gpu
-    vbatch_size = num_of_vsamples//1000
+    vbatch_size = 1000
 
     # n_train_batches = train_set_x.shape[0] // batch_size
     n_valid_batches = valid_set_x.shape[0] // vbatch_size
@@ -464,7 +467,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 
     rng = numpy.random.RandomState(1234)
 
-    n_in = 8*8*3
+    n_in = 16*16*3
 
     # construct the MLP class
     classifier = MLP(
@@ -477,7 +480,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
         activation=lambda x: 1.7159*T.tanh((2/3)*x)
     )
 
-    neurons_per_layer = [n_in] + [n_hidden]*h_layers + [n_in]
+    neurons_per_layer = [n_in] + [n_hidden]*h_layers + [n_hidden]
     p_per_layer = (0,1) # a number for each parameters per layer, 2: W and b
     neurons_per_layer = [val for val in neurons_per_layer for _ in (0,1)]
 
@@ -503,6 +506,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #     }
     # )
     (dataset,n_partitions) = findGPUlimit(train_set_x,train_set_y,8)
+    n_partitions = n_partitions+2
     shared_x, shared_y = dataset
 
     batch_x = T.matrix()
@@ -586,7 +590,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     n_train_batches = partition_size//batch_size
 
     # early-stopping parameters
-    patience = 50*n_train_batches*n_partitions  # look as this many examples regardless
+    patience = 40*n_train_batches*n_partitions  # look as this many examples regardless
     patience_increase = 1*n_train_batches*n_partitions  # wait this much longer when a new best is
                            # found
     improvement_threshold = 0.001  # a relative improvement of this much is
@@ -609,7 +613,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     #####
     # Add image output
     #####
-    im = scipy.misc.imread("test.jpg",mode='YCbCr')/255
+    rgbim = scipy.misc.imread("test.jpg",mode='RGB')/255
+    im = rgb2ycbcr(rgbim)
 
     prob = numpy.ones(num_of_samples)/num_of_samples
     p_weight = 2
@@ -668,8 +673,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                 # itr = (epoch - 1) * n_train_batches*n_partitions + partition_num + (index*batch_size) 
                 itr = itr + 1
 
-                workdone = ((itr + 1) % validation_frequency)/validation_frequency
                 if(itr%100 == 0):
+                    workdone = ((itr + 1) % validation_frequency)/validation_frequency
                     print("\rProgress: [{0:10s}] {1:.1f}% epoch: {2} partition: {3}/{4} batch:{5}/{6} ".format('#' * int(workdone * 10), workdone*100, epoch, partition_num+1, n_partitions, index+1, n_train_batches), end="", flush=True)
 
                 if (itr + 1) % validation_frequency == 0:
@@ -688,22 +693,29 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                             epoch,
                             index + 1,
                             n_train_batches,
-                            partition_num,
+                            partition_num+1,
                             n_partitions,
                             this_validation_loss
                         )
                     )
+                    
+                    ## Save results and images
+                    if this_validation_loss > best_validation_loss:
+                        name = 'model{:04d}_noimprove'.format(epoch)
+                    else:
+                        name = 'model{:04d}'.format(epoch)
+                        
+                    with open('results/models/{}.pkl'.format(name), 'wb') as f:
+                            pickle.dump(classifier, f)
 
+                    cleanim = unjpeg(im,classifier,m,s)
+                    outim = ycbcr2rgb(cleanim)
+                    res = Image.fromarray(numpy.uint8(outim*255),mode='RGB')
+                    res.save('results/outimages/{}.png'.format(name))
 
                     # if we got the best validation score until now
                     if this_validation_loss < best_validation_loss:
-                        ## Save results and images
-                        with open('results/models/model{:04d}.pkl'.format(epoch), 'wb') as f:
-                                pickle.dump(classifier, f)
 
-                        cleanim = unjpeg(im,classifier,m,s)
-                        res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
-                        res.save('results/outimages/model{:04d}.png'.format(epoch))
 
                         #improve patience if loss improvement is good enough
                         if (
@@ -739,7 +751,24 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
            os.path.split(__file__)[1] +
            ' ran for %.2fm' % ((end_time - start_time) / 60.)), file=sys.stderr)
 
-
+def rgb2ycbcr(rgbim):
+    h,w,c = rgbim.shape
+    im = numpy.zeros((h,w,c),dtype=theano.config.floatX)
+    im[:,:,0] = 0.299*rgbim[:,:,0] + 0.587*rgbim[:,:,1] + 0.114*rgbim[:,:,2]
+    im[:,:,1] = ((-0.299*rgbim[:,:,0] - 0.587*rgbim[:,:,1] + 0.886*rgbim[:,:,2])/1.772) + 0.5
+    im[:,:,2] = ((0.701*rgbim[:,:,0] - 0.587*rgbim[:,:,1] - 0.114*rgbim[:,:,2])/1.402) + 0.5
+    im = numpy.clip(im,0,1)
+    return im
+    
+def ycbcr2rgb(ycbcrim):
+    h,w,c = ycbcrim.shape
+    im = numpy.zeros((h,w,c),dtype=theano.config.floatX)
+    im[:,:,0] = ycbcrim[:,:,0] + 1.402*(ycbcrim[:,:,2]-0.5)
+    im[:,:,1] = ycbcrim[:,:,0] - ((0.114*1.772*(ycbcrim[:,:,1]-0.5)+0.229*1.402*(ycbcrim[:,:,2]-0.5))/0.587)
+    im[:,:,2] = ycbcrim[:,:,0] + 1.772*(ycbcrim[:,:,1]-0.5)
+    im = numpy.clip(im,0,1)
+    return im
+    
 def unjpeg(im,classifier,m=0,s=1):
     """
     Apply to an image
@@ -762,24 +791,28 @@ def unjpeg(im,classifier,m=0,s=1):
         newim = im
 
     result = numpy.zeros((math.ceil(h/8)*8, math.ceil(w/8)*8,3))
+    rescount = numpy.zeros((math.ceil(h/8)*8, math.ceil(w/8)*8,3))
 
-    for i in range(0,math.ceil(h/8)):
-        for j in range(0,math.ceil(w/8)):
-            block = newim[i*8:(i+1)*8,j*8:(j+1)*8,:]
+    for i in range(0,math.ceil(h/8)-1):
+        for j in range(0,math.ceil(w/8)-1):
+            block = newim[i*8:(i*8)+16,j*8:(j*8)+16,:]
 
             block = (block-m)/s
 
-            x_data = block.reshape((1,8*8*3))
+            x_data = block.reshape((1,16*16*3))
 
             y_data = predict_model(x_data)
 
-            nblock = y_data.reshape((8,8,3))
+            nblock = y_data.reshape((16,16,3))
 
             nblock = (nblock*s)+m
 
-            result[i*8:(i+1)*8,j*8:(j+1)*8,:] = nblock
+            result[i*8:(i*8)+16,j*8:(j*8)+16,:] = result[i*8:(i*8)+16,j*8:(j*8)+16,:] + nblock
+            rescount[i*8:(i*8)+16,j*8:(j*8)+16,:] = rescount[i*8:(i*8)+16,j*8:(j*8)+16,:] + 1
 
+    result = result/rescount
+    result = numpy.clip(result,0,1)
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=100,learning_rate=20,n_hidden=2047,h_layers=4,L2_reg=0.0000,m=0.58,s=0.28)
+    test_mlp(n_epochs=1000, batch_size=100,learning_rate=120,n_hidden=2047,h_layers=3,L2_reg=0.0000,m=0.6,s=0.28)
