@@ -328,7 +328,9 @@ def load_test_data(m=0,s=1):
 		testing_gt = data['testing_gt']
 		testing_in = data['testing_in']
 		
-
+	m = numpy.repeat(numpy.stack((numpy.mean(testing_in[:,0:16*16],axis=1),numpy.mean(testing_in[:,16*16:16*16*2],axis=1),numpy.mean(testing_in[:,16*16*2:],axis=1)),axis=1),16*16,axis=1)
+	s = numpy.repeat(numpy.stack((numpy.std(testing_in[:,0:16*16],axis=1),numpy.std(testing_in[:,16*16:16*16*2],axis=1),numpy.std(testing_in[:,16*16*2:],axis=1)),axis=1),16*16,axis=1)
+	s = s + 0.0001
 	testing_gt = (testing_gt-m)/s
 	testing_in = (testing_in-m)/s
 	
@@ -339,7 +341,9 @@ def load_chunk(index,m=0,s=1):
 		training_gt = data['training_gt']
 		training_in = data['training_in']
 	
-
+	m = numpy.repeat(numpy.stack((numpy.mean(training_in[:,0:16*16],axis=1),numpy.mean(training_in[:,16*16:16*16*2],axis=1),numpy.mean(training_in[:,16*16*2:],axis=1)),axis=1),16*16,axis=1)
+	s = numpy.repeat(numpy.stack((numpy.std(training_in[:,0:16*16],axis=1),numpy.std(training_in[:,16*16:16*16*2],axis=1),numpy.std(training_in[:,16*16*2:],axis=1)),axis=1),16*16,axis=1)
+	s = s + 0.0001
 	training_gt = (training_gt-m)/s
 	training_in = (training_in-m)/s
 	
@@ -793,6 +797,10 @@ def unjpeg(im,classifier,m=0,s=1):
 	for i in range(0,math.ceil(h/8)-1):
 		for j in range(0,math.ceil(w/8)-1):
 			block = newim[i*8:(i*8)+16,j*8:(j*8)+16,:]
+
+			m = numpy.mean(block,axis=(0,1))
+			s = numpy.std(block,axis=(0,1))
+			s = s + 0.0001
 			
 			block = (block-m)/s
 
