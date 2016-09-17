@@ -17,9 +17,17 @@ def rgb2ycbcr(rgbim):
     im[:,:,2] = ((0.701*rgbim[:,:,0] - 0.587*rgbim[:,:,1] - 0.114*rgbim[:,:,2])/1.402) + 0.5
     im = numpy.clip(im,0,1)
     return im
+    
+def binarysearch(data,search):
+    ix = numpy.searchsorted(data,search)
+    return ix < len(data) and search == data[ix]
 
 #images = [entry for entry in os.scandir('./images/') if entry.is_file()]
 images = glob.glob('./images/*.png')
+
+partition_size = 20000
+ppbulk = 50
+maxmemsize = partition_size*ppbulk
 
 print("Counting blocks in images...")
 
@@ -35,23 +43,35 @@ for ix,imgpath in enumerate(images):
 print("")
 print("Total of {} blocks".format(blocks))
 
-trainix = round(blocks*0.75)
+testnum = numpy.min((round(blocks*0.25),500000))
 
-training_gt = numpy.zeros((trainix,16*16*3),dtype=theano.config.floatX)
-testing_gt = numpy.zeros((blocks-trainix,16*16*3),dtype=theano.config.floatX)
-training_in = numpy.zeros((trainix,16*16*3),dtype=theano.config.floatX)
-testing_in = numpy.zeros((blocks-trainix,16*16*3),dtype=theano.config.floatX)
+testing_gt = numpy.zeros((testnum,16*16*3),dtype=theano.config.floatX)
+testing_in = numpy.zeros((testnum,16*16*3),dtype=theano.config.floatX)
 
-trainindices = numpy.arange(0,trainix)
-numpy.random.shuffle(trainindices)
-testindices = numpy.arange(0,blocks-trainix)
-numpy.random.shuffle(testindices)
+bulktraining_gt = numpy.zeros((maxmemsize,16*16*3),dtype=theano.config.floatX)
+bulktraining_in = numpy.zeros((maxmemsize,16*16*3),dtype=theano.config.floatX)
+
+trainorder = numpy.arange(0,maxmemsize)
+numpy.random.shuffle(trainorder)
+
+testchoice = numpy.random.choice(blocks,testnum,False)
+testchoice.sort()
+
+testorder = numpy.arange(0,testnum)
+numpy.random.shuffle(testorder)
+
+#lastpartition = (blocks-testnum) // partition_size
+#lpsize = blocks - testnum - (lastpartition*partition_size)
+
+lastbulk = (blocks-testnum) // maxmemsize
+lbsize = blocks - testnum - (lastbulk*maxmemsize)
 
 print("Computing JPEGs and storing blocks")
-count = 0
-cskip = 0
-final = 0
-testing = False
+overall_count = 0
+train_count = 0
+test_count = 0
+partition_count = 0
+bulk_count = 0
 for ix,imgpath in enumerate(images):
     rgbim = scipy.misc.imread(imgpath,mode='RGB')/255
     h,w,c = rgbim.shape
@@ -84,48 +104,43 @@ for ix,imgpath in enumerate(images):
             block = newim[i*8:(i*8)+16,j*8:(j*8)+16,:]
             jpegblock = jpegim[i*8:(i*8)+16,j*8:(j*8)+16,:]
 
-            # block = (block-0.5)/0.2
-            # jpegblock = (jpegblock-0.5)/0.2
-
-            # for k in range(0,3):
-            # 	block[:,:,k] = numpy.divide((block[:,:,k]-0.5),0.2)
-            # 	jpegblock[:,:,k] = numpy.divide((jpegblock[:,:,k]-0.5),0.2)
-
-            # # too many 'plain colour' patches, filter some/all
-            # if numpy.sqrt(numpy.mean((jpegblock-block)**2)) < 0.01 and random.randint(0,3) != 3:
-            # 	cskip += 1
-            # 	if not testing:
-            # 		trainix -= 1
-            # 	continue
-
-            if count >= trainix:
-                testing = True
-                final = count
-                count = 0
-                print("\r{} training blocks{}".format(final,' '*50))
-
-            if not testing:
-                training_gt[trainindices[count],:] = block.reshape((1,16*16*3))
-                training_in[trainindices[count],:] = jpegblock.reshape((1,16*16*3))
+            if not binarysearch(testchoice,overall_count):
+                bulktraining_gt[trainorder[train_count],:] = block.reshape((1,16*16*3))
+                bulktraining_in[trainorder[train_count],:] = jpegblock.reshape((1,16*16*3))
+                train_count += 1
+                if train_count == maxmemsize:
+                    # save a batch of partitions
+                    print('\nSaving partitions {} to {}'.format(partition_count,partition_count+ppbulk-1))
+                    for partix in range(0,ppbulk):
+                        training_gt = bulktraining_gt[partix*partition_size:(partix+1)*partition_size,:]
+                        training_in = bulktraining_in[partix*partition_size:(partix+1)*partition_size,:]
+                        with open('partitioneddata/partition{:06d}.pkl'.format(partition_count+partix), 'wb') as file:
+                            numpy.savez_compressed(file,training_gt=training_gt,training_in=training_in)
+                    partition_count += ppbulk
+                    
+                    bulk_count += 1
+                    if bulk_count == lastbulk:
+                        maxmemsize = lbsize
+                        bulktraining_gt = numpy.zeros((maxmemsize,16*16*3),dtype=theano.config.floatX)
+                        bulktraining_in = numpy.zeros((maxmemsize,16*16*3),dtype=theano.config.floatX)
+                        trainorder = numpy.arange(0,maxmemsize)
+                    elif bulk_count > lastbulk:
+                        print('reached last stuff!')
+                    numpy.random.shuffle(trainorder)
+                    train_count = 0
             else:
-                testing_gt[testindices[count],:] = block.reshape((1,16*16*3))
-                testing_in[testindices[count],:] = jpegblock.reshape((1,16*16*3))
+                testing_gt[testorder[test_count],:] = block.reshape((1,16*16*3))
+                testing_in[testorder[test_count],:] = jpegblock.reshape((1,16*16*3))
+                test_count += 1
 
-            count += 1
+            overall_count += 1
 
     workdone = ix/len(images)
     print("\rProgress: [{0:50s}] {1:.1f}%".format('#' * int(workdone * 50), workdone*100), end="", flush=True)
 
-if cskip != 0:
-    training_gt = training_gt[0:final,:]
-    training_in = training_in[0:final,:]
-    testing_gt = testing_gt[0:count,:]
-    testing_in = testing_in[0:count,:]
-
 
 print("")
-print("{} testing blocks".format(count))
-print("{} blocks skipped".format(cskip))
+print("{} testing blocks".format(testnum))
 
 
 # Now done while storing
@@ -140,8 +155,8 @@ print("{} blocks skipped".format(cskip))
 # testing_gt = alltesting[:,:16*16*3]
 # testing_in = alltesting[:,16*16*3:]
 
-print("Saving data")
+print("Saving test data")
 
-with open('1616data.pickle', 'wb') as file:
-    numpy.savez_compressed(file,training_gt=training_gt,training_in=training_in,testing_gt=testing_gt,testing_in=testing_in)
+with open('testdata.pkl', 'wb') as file:
+    numpy.savez_compressed(file,testing_gt=testing_gt,testing_in=testing_in)
 
