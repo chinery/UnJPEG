@@ -68,7 +68,6 @@ import theano
 import theano.tensor as T
 from theano import pp
 import theano.tensor.basic
-from theano.tensor import fft
 
 import pickle
 
@@ -277,7 +276,7 @@ class MLP(object):
 				input=self.hiddenLayers[h_layers-1].output,
 				n_in=n_hidden,
 				n_out=n_out,
-				activation=None
+				activation=activation
 			)
 
 		# self.hiddenLayer2 = HiddenLayer(
@@ -440,16 +439,22 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 	:param n_epochs: maximal number of epochs to run the optimizer
 
 """
+	with open('params.pkl', 'rb') as file:
+		params = pickle.load(file)
+	
 	print('... loading test data')
 	valid_set_x, valid_set_y = load_test_data(m,s)
 	
 	print('... loading first batch of training data')
 	numofchunks = len(glob.glob('./partitioneddata/*.pkl'))
 	
+	
 	data_x, _ = load_chunk(0,m,s)
 	numperload = data_x.shape[0]
 	if maxload % numperload != 0:
 		print('Error: maxload must be a multiple of saved data partition size')
+	
+	
 	
 	loadspervalidation = maxload//numperload
 	
@@ -612,6 +617,9 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 	rgbim = scipy.misc.imread("test.jpg",mode='RGB')/255
 	im = rgb2ycbcr(rgbim)
 
+	# sig = s
+	sig = numpy.mean(params[1])*s
+	
 	#prob = numpy.ones(num_of_samples)/num_of_samples
 	#p_weight = 2
 
@@ -690,20 +698,20 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 							n_train_batches,
 							partition_num+1,
 							n_partitions,
-							this_validation_loss*s
+							this_validation_loss*sig
 						)
 					)
 					
 					## Save results and images
 					if this_validation_loss > best_validation_loss:
-						name = 'model{:04d}_{:.4f}_noimprove'.format(epoch,this_validation_loss*s)
+						name = 'model{:04d}_{:.4f}_noimprove'.format(epoch,this_validation_loss*sig)
 					else:
-						name = 'model{:04d}_{:.4f}'.format(epoch,this_validation_loss*s)
+						name = 'model{:04d}_{:.4f}'.format(epoch,this_validation_loss*sig)
 						
 					with open('results/models/{}.pkl'.format(name), 'wb') as f:
 							pickle.dump(classifier, f)
 
-					cleanim = unjpeg(im,classifier,m,s)
+					cleanim = unjpeg(im,classifier,params,m,s)
 					outim = ycbcr2rgb(cleanim)
 					res = Image.fromarray(numpy.uint8(outim*255),mode='RGB')
 					res.save('results/outimages/{}.png'.format(name))
@@ -725,7 +733,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 						# test_score = numpy.mean(test_losses)
 
 						print(('     epoch %i, best error %f, improvement %f') %
-							(epoch, this_validation_loss*s, (best_validation_loss*s)-(s*this_validation_loss)))
+							(epoch, this_validation_loss*sig, (best_validation_loss*sig)-(sig*this_validation_loss)))
 
 						best_validation_loss = this_validation_loss
 						best_iter = itr
@@ -741,7 +749,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 	end_time = timeit.default_timer()
 	print(('Optimization complete. Best validation score of %f %% '
 		'obtained at iteration %i, with test performance %f %%') %
-		(best_validation_loss * 100., best_iter + 1, test_score * s))
+		(best_validation_loss * 100., best_iter + 1, test_score * sig))
 	print(('The code for file ' +
 		os.path.split(__file__)[1] +
 		' ran for %.2fm' % ((end_time - start_time) / 60.)), file=sys.stderr)
@@ -764,7 +772,21 @@ def ycbcr2rgb(ycbcrim):
 	im = numpy.clip(im,0,1)
 	return im
 	
-def unjpeg(im,classifier,m=0,s=1):
+def centre(data,params):
+	centreddata = data
+	centreddata -= params[0]
+	centreddata = numpy.dot(centreddata,params[2])
+	centreddata /= params[1]
+	return centreddata
+	
+def reconstruct(data, params):
+	recon = data
+	recon *= params[1]
+	recon = numpy.dot(recon,params[2].T)
+	recon += params[0]
+	return recon
+	
+def unjpeg(im,classifier,params,m=0,s=1):
 	"""
 	Apply to an image
 	"""
@@ -792,15 +814,15 @@ def unjpeg(im,classifier,m=0,s=1):
 		for j in range(0,math.ceil(w/8)-1):
 			block = newim[i*8:(i*8)+16,j*8:(j*8)+16,:]
 
-			block = (block-m)/s
-
-			x_data = block.reshape((1,16*16*3))
+			x_data = centre(block.reshape((1,16*16*3)),params)
+			
+			x_data = (x_data-m)/s
 
 			y_data = predict_model(x_data)
 
-			nblock = y_data.reshape((16,16,3))
-
-			nblock = (nblock*s)+m
+			y_data = (y_data*s)+m
+			
+			nblock = reconstruct(y_data,params).reshape((16,16,3))
 
 			result[i*8:(i*8)+16,j*8:(j*8)+16,:] = result[i*8:(i*8)+16,j*8:(j*8)+16,:] + nblock
 			rescount[i*8:(i*8)+16,j*8:(j*8)+16,:] = rescount[i*8:(i*8)+16,j*8:(j*8)+16,:] + 1
@@ -810,4 +832,4 @@ def unjpeg(im,classifier,m=0,s=1):
 	return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-	test_mlp(n_epochs=1000, batch_size=100,learning_rate=40,n_hidden=2047,h_layers=3,L2_reg=0.0000,m=0.6,s=0.4,maxload=500000)
+	test_mlp(n_epochs=1000, batch_size=100,learning_rate=100,n_hidden=2047,h_layers=3,L2_reg=0.0000,m=0,s=3,maxload=500000)
