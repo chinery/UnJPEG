@@ -832,4 +832,4 @@ def unjpeg(im,classifier,params,m=0,s=1):
 	return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-	test_mlp(n_epochs=1000, batch_size=100,learning_rate=100,n_hidden=2047,h_layers=3,L2_reg=0.0000,m=0,s=3,maxload=500000)
+	test_mlp(n_epochs=1000, batch_size=100,learning_rate=120,n_hidden=2047,h_layers=3,L2_reg=0.0000,m=0,s=7,maxload=500000)
