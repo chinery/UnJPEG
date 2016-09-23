@@ -253,6 +253,7 @@ class MLP(object):
 		which the labels lie
 
 		"""
+		
 
 		self.hiddenLayers = [None]*(h_layers+1)
 		self.hiddenLayers[0] = HiddenLayer(
@@ -355,6 +356,8 @@ def load_chunk_range(indices,m=0,s=1):
 		newx, newy = load_chunk(indices[len(indices)-1],m,s)
 		data_x = numpy.concatenate((data_x, newx), axis=0)
 		data_y = numpy.concatenate((data_y, newy), axis=0)
+		
+		# print(numpy.max(data_x))
 			
 	return (data_x, data_y)
 	
@@ -421,7 +424,7 @@ def findGPUlimit(data_x, data_y, min_n=1):
 
 def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 			dataset='', batch_size=10000, n_hidden=500, classifier=None,h_layers=1,m=0,s=1,
-			maxload=500000):
+			maxload=500000,epochper=1):
 	"""
 	:type learning_rate: float
 	:param learning_rate: learning rate used (factor for the stochastic
@@ -441,6 +444,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 """
 	with open('params.pkl', 'rb') as file:
 		params = pickle.load(file)
+		blocksize = pickle.load(file)
 	
 	print('... loading test data')
 	valid_set_x, valid_set_y = load_test_data(m,s)
@@ -496,7 +500,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 
 	rng = numpy.random.RandomState(1234)
 
-	n_in = 16*16*3
+	n_in = blocksize*blocksize*3
 
 	# construct the MLP class
 	classifier = MLP(
@@ -596,7 +600,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 						# found
 	improvement_threshold = 0.001  # a relative improvement of this much is
 								# considered significant
-	validation_frequency = min(n_train_batches*n_partitions, patience // 2)
+	validation_frequency = min(n_train_batches*n_partitions*epochper, patience // 2)
 								# go through this many
 								# minibatche before checking the network
 								# on the validation set; in this case we
@@ -632,118 +636,121 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 	sampleorder = numpy.arange(0,num_of_samples)
 	while (epoch < n_epochs) and (not done_looping):
 		epoch = epoch + 1
-		if epoch != 1:
-			chunkto = numpy.min((chunk_index+loadspervalidation,numofchunks))
-			train_set_x, train_set_y = (None, None)
-			train_set_x, train_set_y = load_chunk_range(range(chunk_index,chunkto),m,s)
-			if chunkto == numofchunks or chunkto == loadspervalidation:
-				partition_size = train_set_x.shape[0]//n_partitions
-				n_train_batches = partition_size//batch_size
-				sampleorder = numpy.arange(0,train_set_x.shape[0])
-			chunk_index = chunkto % numofchunks
-		numpy.random.shuffle(sampleorder)
-		for partition_num in range(n_partitions):
+		loopnum = 0
+		for lpe in range(epochper):
+			loopnum = loopnum + 1
+			if epoch != 1:
+				chunkto = numpy.min((chunk_index+loadspervalidation,numofchunks))
+				train_set_x, train_set_y = (None, None)
+				train_set_x, train_set_y = load_chunk_range(range(chunk_index,chunkto),m,s)
+				if chunkto == numofchunks or chunkto == loadspervalidation:
+					partition_size = train_set_x.shape[0]//n_partitions
+					n_train_batches = partition_size//batch_size
+					sampleorder = numpy.arange(0,train_set_x.shape[0])
+				chunk_index = chunkto % numofchunks
+			numpy.random.shuffle(sampleorder)
+			for partition_num in range(n_partitions):
 
-			# # sample the k entries with the highest probability
-			# prob = prob/numpy.sum(prob)
-			# kth = num_of_samples-partition_size
-			# partition_sample = numpy.argpartition(prob,kth)[kth:]
-			# prob_partition = prob[partition_sample]
-			# ppsum = numpy.sum(prob_partition)
+				# # sample the k entries with the highest probability
+				# prob = prob/numpy.sum(prob)
+				# kth = num_of_samples-partition_size
+				# partition_sample = numpy.argpartition(prob,kth)[kth:]
+				# prob_partition = prob[partition_sample]
+				# ppsum = numpy.sum(prob_partition)
 
-			# non-probabilistic version
-			partition_sample = sampleorder[partition_num * partition_size : (partition_num+1) * partition_size]            
+				# non-probabilistic version
+				partition_sample = sampleorder[partition_num * partition_size : (partition_num+1) * partition_size]            
 
-			shared_x.set_value(numpy.asarray(train_set_x[partition_sample,:],dtype=theano.config.floatX))
-			shared_y.set_value(numpy.asarray(train_set_y[partition_sample,:],dtype=theano.config.floatX))
+				shared_x.set_value(numpy.asarray(train_set_x[partition_sample,:],dtype=theano.config.floatX))
+				shared_y.set_value(numpy.asarray(train_set_y[partition_sample,:],dtype=theano.config.floatX))
 
-			for index in range(n_train_batches):
-				# # probabilistic version
-				# prob_partition= prob_partition/numpy.sum(prob_partition)
-				# innersample = numpy.random.choice(partition_size,batch_size,False,prob_partition)
-				# minibatch_avg_cost = train_model(innersample)
-				# # update probabilities
-				# # want to incentivise picking different samples, but if the error is higher then
-				# # return to this sample sooner
-				# prob_partition[innersample] = numpy.clip(prob_partition[innersample]*p_weight*minibatch_avg_cost,0.0001,1)
-				# prob[partition_sample[innersample]] = numpy.clip(prob[partition_sample[innersample]]*p_weight*minibatch_avg_cost,0.0001,1)
-				# # prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
+				for index in range(n_train_batches):
+					# # probabilistic version
+					# prob_partition= prob_partition/numpy.sum(prob_partition)
+					# innersample = numpy.random.choice(partition_size,batch_size,False,prob_partition)
+					# minibatch_avg_cost = train_model(innersample)
+					# # update probabilities
+					# # want to incentivise picking different samples, but if the error is higher then
+					# # return to this sample sooner
+					# prob_partition[innersample] = numpy.clip(prob_partition[innersample]*p_weight*minibatch_avg_cost,0.0001,1)
+					# prob[partition_sample[innersample]] = numpy.clip(prob[partition_sample[innersample]]*p_weight*minibatch_avg_cost,0.0001,1)
+					# # prob[partition_sample[index*batch_size:(index+1)*batch_size]] = prob[partition_sample[index*batch_size:(index+1)*batch_size]]*p_weight*minibatch_avg_cost
 
-				# non probabilistic version
-				minibatch_avg_cost = train_model(numpy.arange(index*batch_size,(index+1)*batch_size))
+					# non probabilistic version
+					minibatch_avg_cost = train_model(numpy.arange(index*batch_size,(index+1)*batch_size))
 
-				# iteration number
-				# itr = (epoch - 1) * n_train_batches*n_partitions + partition_num + (index*batch_size) 
-				itr = itr + 1
+					# iteration number
+					# itr = (epoch - 1) * n_train_batches*n_partitions + partition_num + (index*batch_size) 
+					itr = itr + 1
 
-				if(itr%100 == 0):
-					workdone = ((itr + 1) % validation_frequency)/validation_frequency
-					print("\rProgress: [{0:10s}] {1:.1f}% epoch: {2} partition: {3}/{4} batch:{5}/{6} ".format('#' * int(workdone * 10), workdone*100, epoch, partition_num+1, n_partitions, index+1, n_train_batches), end="", flush=True)
+					if(itr%100 == 0):
+						workdone = ((itr + 1) % validation_frequency)/validation_frequency
+						print("\rProgress: [{0:10s}] {1:.1f}% epoch: {2} partition: {3}/{4} batch:{5}/{6} ".format('#' * int(workdone * 10), workdone*100, epoch, partition_num+1, n_partitions, index+1, n_train_batches), end="", flush=True)
 
-				if (itr + 1) % validation_frequency == 0:
-					print("")
-					# compute zero-one loss on validation set
-					# validation_losses = [validate_model(i) for i
-					#                      in range(n_valid_batches)]
-					validation_losses = [validate_model(valid_set_x[i * vbatch_size: (i + 1) * vbatch_size],
-														valid_set_y[i * vbatch_size: (i + 1) * vbatch_size]) for i
-										in range(n_valid_batches)]                     
-					this_validation_loss = numpy.mean(validation_losses)
+					if (itr + 1) % validation_frequency == 0:
+						print("")
+						# compute zero-one loss on validation set
+						# validation_losses = [validate_model(i) for i
+						#                      in range(n_valid_batches)]
+						validation_losses = [validate_model(valid_set_x[i * vbatch_size: (i + 1) * vbatch_size],
+															valid_set_y[i * vbatch_size: (i + 1) * vbatch_size]) for i
+											in range(n_valid_batches)]                     
+						this_validation_loss = numpy.mean(validation_losses)
 
-					print(
-						'epoch %i, minibatch %i/%i, partition: %i/%i, validation error %f' %
-						(
-							epoch,
-							index + 1,
-							n_train_batches,
-							partition_num+1,
-							n_partitions,
-							this_validation_loss*sig
+						print(
+							'epoch %i, minibatch %i/%i, partition: %i/%i, validation error %f' %
+							(
+								epoch,
+								index + 1,
+								n_train_batches,
+								partition_num+1,
+								n_partitions,
+								this_validation_loss*sig
+							)
 						)
-					)
-					
-					## Save results and images
-					if this_validation_loss > best_validation_loss:
-						name = 'model{:04d}_{:.4f}_noimprove'.format(epoch,this_validation_loss*sig)
-					else:
-						name = 'model{:04d}_{:.4f}'.format(epoch,this_validation_loss*sig)
 						
-					with open('results/models/{}.pkl'.format(name), 'wb') as f:
-							pickle.dump(classifier, f)
+						## Save results and images
+						if this_validation_loss > best_validation_loss:
+							name = 'model{:04d}_{:.4f}_noimprove'.format(epoch,this_validation_loss*sig)
+						else:
+							name = 'model{:04d}_{:.4f}'.format(epoch,this_validation_loss*sig)
+							
+						with open('results/models/{}.pkl'.format(name), 'wb') as f:
+								pickle.dump(classifier, f)
 
-					cleanim = unjpeg(im,classifier,params,m,s)
-					outim = ycbcr2rgb(cleanim)
-					res = Image.fromarray(numpy.uint8(outim*255),mode='RGB')
-					res.save('results/outimages/{}.png'.format(name))
+						cleanim = unjpeg(im,classifier,params,blocksize,m,s)
+						outim = ycbcr2rgb(cleanim)
+						res = Image.fromarray(numpy.uint8(outim*255),mode='RGB')
+						res.save('results/outimages/{}.png'.format(name))
 
-					# if we got the best validation score until now
-					if this_validation_loss < best_validation_loss:
+						# if we got the best validation score until now
+						if this_validation_loss < best_validation_loss:
 
 
-						#improve patience if loss improvement is good enough
-						if (
-							this_validation_loss < best_validation_loss *
-							(1-improvement_threshold)
-						):
-							patience = max(patience, itr + patience_increase)
+							#improve patience if loss improvement is good enough
+							if (
+								this_validation_loss < best_validation_loss *
+								(1-improvement_threshold)
+							):
+								patience = max(patience, itr + patience_increase)
 
-						# test it on the test set
-						# test_losses = [test_model(i) for i
-						#                in range(n_test_batches)]
-						# test_score = numpy.mean(test_losses)
+							# test it on the test set
+							# test_losses = [test_model(i) for i
+							#                in range(n_test_batches)]
+							# test_score = numpy.mean(test_losses)
 
-						print(('     epoch %i, best error %f, improvement %f') %
-							(epoch, this_validation_loss*sig, (best_validation_loss*sig)-(sig*this_validation_loss)))
+							print(('     epoch %i, best error %f, improvement %f') %
+								(epoch, this_validation_loss*sig, (best_validation_loss*sig)-(sig*this_validation_loss)))
 
-						best_validation_loss = this_validation_loss
-						best_iter = itr
+							best_validation_loss = this_validation_loss
+							best_iter = itr
 
-						with open('best_model.pkl', 'wb') as f:
-							pickle.dump(classifier, f)
+							with open('best_model.pkl', 'wb') as f:
+								pickle.dump(classifier, f)
 
-				if patience <= itr:
-					done_looping = True
-					break
+					if patience <= itr:
+						done_looping = True
+						break
 
 
 	end_time = timeit.default_timer()
@@ -754,12 +761,15 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 		os.path.split(__file__)[1] +
 		' ran for %.2fm' % ((end_time - start_time) / 60.)), file=sys.stderr)
 
+# convert to YCbCr using ITU-T T.871 JPEG standard
 def rgb2ycbcr(rgbim):
 	h,w,c = rgbim.shape
 	im = numpy.zeros((h,w,c),dtype=theano.config.floatX)
 	im[:,:,0] = 0.299*rgbim[:,:,0] + 0.587*rgbim[:,:,1] + 0.114*rgbim[:,:,2]
-	im[:,:,1] = ((-0.299*rgbim[:,:,0] - 0.587*rgbim[:,:,1] + 0.886*rgbim[:,:,2])/1.772) + 0.5
-	im[:,:,2] = ((0.701*rgbim[:,:,0] - 0.587*rgbim[:,:,1] - 0.114*rgbim[:,:,2])/1.402) + 0.5
+	# im[:,:,1] = ((-0.299*rgbim[:,:,0] - 0.587*rgbim[:,:,1] + 0.886*rgbim[:,:,2])/1.772) + 0.5
+	im[:,:,1] = 0.5 - 0.168736*rgbim[:,:,0] - 0.331264*rgbim[:,:,1] + 0.5*rgbim[:,:,2]
+	# im[:,:,2] = ((0.701*rgbim[:,:,0] - 0.587*rgbim[:,:,1] - 0.114*rgbim[:,:,2])/1.402) + 0.5
+	im[:,:,2] = 0.5 + 0.5*rgbim[:,:,0] - 0.418688*rgbim[:,:,1] - 0.081312*rgbim[:,:,2]
 	im = numpy.clip(im,0,1)
 	return im
 	
@@ -767,7 +777,8 @@ def ycbcr2rgb(ycbcrim):
 	h,w,c = ycbcrim.shape
 	im = numpy.zeros((h,w,c),dtype=theano.config.floatX)
 	im[:,:,0] = ycbcrim[:,:,0] + 1.402*(ycbcrim[:,:,2]-0.5)
-	im[:,:,1] = ycbcrim[:,:,0] - ((0.114*1.772*(ycbcrim[:,:,1]-0.5)+0.229*1.402*(ycbcrim[:,:,2]-0.5))/0.587)
+	# im[:,:,1] = ycbcrim[:,:,0] - ((0.114*1.772*(ycbcrim[:,:,1]-0.5)+0.229*1.402*(ycbcrim[:,:,2]-0.5))/0.587)
+	im[:,:,1] = ycbcrim[:,:,0] - 0.344136*(ycbcrim[:,:,1]-0.5) -0.714136*(ycbcrim[:,:,2]-0.5)
 	im[:,:,2] = ycbcrim[:,:,0] + 1.772*(ycbcrim[:,:,1]-0.5)
 	im = numpy.clip(im,0,1)
 	return im
@@ -786,7 +797,7 @@ def reconstruct(data, params):
 	recon += params[0]
 	return recon
 	
-def unjpeg(im,classifier,params,m=0,s=1):
+def unjpeg(im,classifier,params,blocksize,m=0,s=1):
 	"""
 	Apply to an image
 	"""
@@ -810,11 +821,11 @@ def unjpeg(im,classifier,params,m=0,s=1):
 	result = numpy.zeros((math.ceil(h/8)*8, math.ceil(w/8)*8,3))
 	rescount = numpy.zeros((math.ceil(h/8)*8, math.ceil(w/8)*8,3))
 
-	for i in range(0,math.ceil(h/8)-1):
-		for j in range(0,math.ceil(w/8)-1):
-			block = newim[i*8:(i*8)+16,j*8:(j*8)+16,:]
+	for i in range(0,math.ceil(h/8)-((blocksize//8)-1)):
+		for j in range(0,math.ceil(w/8)-((blocksize//8)-1)):
+			block = newim[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:]
 
-			x_data = centre(block.reshape((1,16*16*3)),params)
+			x_data = centre(block.reshape((1,blocksize*blocksize*3)),params)
 			
 			x_data = (x_data-m)/s
 
@@ -822,14 +833,14 @@ def unjpeg(im,classifier,params,m=0,s=1):
 
 			y_data = (y_data*s)+m
 			
-			nblock = reconstruct(y_data,params).reshape((16,16,3))
+			nblock = reconstruct(y_data,params).reshape((blocksize,blocksize,3))
 
-			result[i*8:(i*8)+16,j*8:(j*8)+16,:] = result[i*8:(i*8)+16,j*8:(j*8)+16,:] + nblock
-			rescount[i*8:(i*8)+16,j*8:(j*8)+16,:] = rescount[i*8:(i*8)+16,j*8:(j*8)+16,:] + 1
+			result[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] = result[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] + nblock
+			rescount[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] = rescount[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] + 1
 
 	result = result/rescount
 	result = numpy.clip(result,0,1)
 	return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-	test_mlp(n_epochs=1000, batch_size=100,learning_rate=120,n_hidden=2047,h_layers=3,L2_reg=0.0000,m=0,s=7,maxload=500000)
+	test_mlp(n_epochs=1000, batch_size=100,learning_rate=500,n_hidden=2047,h_layers=3,L2_reg=0.0000,m=0,s=8.2,maxload=100000,epochper=5)
