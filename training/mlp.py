@@ -200,7 +200,7 @@ class TopLayer(object):
 	#     return -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]), y])
 	#     # end-snippet-2
 
-	def error(self, y):
+	def error(self, y, bounds=None):
 		"""Return a float representing error in the minibatch
 
 		:type y: theano.tensor.TensorType
@@ -214,8 +214,12 @@ class TopLayer(object):
 				('y', y.type, 'output', self.output.type)
 			)
 		
-		return T.sqrt(T.mean((self.output - y)**2))
-		# return T.sqrt(T.mean((fft.rfft(self.output)-fft.rfft(y))**2))
+		if bounds is not None:
+			out = T.clip(self.output, bounds[0], bounds[1])
+		else:
+			out = self.output
+		
+		return T.sqrt(T.mean((out - y)**2))
 		
 
 
@@ -469,6 +473,11 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 	train_set_x, train_set_y = load_chunk_range(range(chunk_index,chunk_index+loadspervalidation),m,s)
 	chunk_index += loadspervalidation
 	
+	# imagemax = numpy.max((numpy.max(valid_set_y),numpy.max(train_set_y)))
+	# imagemin = numpy.min((numpy.min(valid_set_y),numpy.min(train_set_y)))
+	# bound = (imagemin, imagemax)
+	bound = ((0-m)/s,(1-m)/s)
+	
 	print('... testing GPU memory limit')
 	(shareddataset,n_partitions) = findGPUlimit(train_set_x, train_set_y, 4)
 	n_partitions += 1
@@ -518,7 +527,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 	neurons_per_layer = [val for val in neurons_per_layer for _ in (0,1)]
 
 	cost = (
-		classifier.error(y)
+		classifier.error(y,bound)
 		+ L1_reg * classifier.L1
 		+ L2_reg * classifier.L2_sqr
 	)
@@ -529,7 +538,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
 
 	validate_model = theano.function(
 		inputs=[batch_x,batch_y],
-		outputs=classifier.error(y),
+		outputs=classifier.error(y,bound),
 		givens={
 			x: batch_x,
 			y: batch_y
@@ -843,4 +852,4 @@ def unjpeg(im,classifier,params,blocksize,m=0,s=1):
 	return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-	test_mlp(n_epochs=1000, batch_size=100,learning_rate=500,n_hidden=2047,h_layers=3,L2_reg=0.0000,m=0,s=8.2,maxload=100000,epochper=5)
+	test_mlp(n_epochs=1000, batch_size=100,learning_rate=500,n_hidden=8000,h_layers=4,L2_reg=0.0000,m=0.58,s=0.38,maxload=100000,epochper=5)

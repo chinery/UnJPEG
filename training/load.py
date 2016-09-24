@@ -16,27 +16,29 @@ def binarysearch(data,search):
 	
 def pca(data):
 	centreddata = data
-	mu =  numpy.tile(numpy.asarray([numpy.mean(centreddata[:,::3]),numpy.mean(centreddata[:,1::3]),numpy.mean(centreddata[:,2::3])]),blocksize*blocksize)
-	centreddata -= mu
-	(u,s,v) = numpy.linalg.svd(centreddata, full_matrices=False)
-	centreddata = numpy.dot(centreddata,v)
-	sig = numpy.tile(numpy.asarray([numpy.std(centreddata[:,::3]),numpy.std(centreddata[:,1::3]),numpy.std(centreddata[:,2::3])]),blocksize*blocksize)
-	centreddata /= sig
-	print('\npca std ', numpy.std(centreddata,axis=0)[0])
-	return (centreddata, (mu, sig, v))
+	# mu =  numpy.tile(numpy.asarray([numpy.mean(centreddata[:,::3]),numpy.mean(centreddata[:,1::3]),numpy.mean(centreddata[:,2::3])]),blocksize*blocksize)
+	# centreddata -= mu
+	# # (u,s,v) = numpy.linalg.svd(centreddata, full_matrices=False)
+	v = numpy.eye(centreddata.shape[1])
+	# centreddata = numpy.dot(centreddata,v)
+	# sig = numpy.tile(numpy.asarray([numpy.std(centreddata[:,::3]),numpy.std(centreddata[:,1::3]),numpy.std(centreddata[:,2::3])]),blocksize*blocksize)
+	# centreddata /= sig
+	# # print('\npca std ', numpy.std(centreddata,axis=0)[0])
+	# return (centreddata, (mu, sig, v))
+	return (centreddata, (0, 1, v))
 	
 def centre(data,params):
 	centreddata = data
-	centreddata -= params[0]
-	centreddata = numpy.dot(centreddata,params[2])
-	centreddata /= params[1]
+	# centreddata -= params[0]
+	# centreddata = numpy.dot(centreddata,params[2])
+	# centreddata /= params[1]
 	return centreddata
 	
 def reconstruct(data, params):
 	recon = data
-	recon *= params[1]
-	recon = numpy.dot(recon,params[2].T)
-	recon += params[0]
+	# recon *= params[1]
+	# recon = numpy.dot(recon,params[2].T)
+	# recon += params[0]
 	return recon
 	
 	
