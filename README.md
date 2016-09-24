@@ -1,8 +1,11 @@
 ##UnJPEG: removing jpeg atefacts from screenshots with a neural network
 
-Note: this is just a pet project to teach myself about neural networks and Theano, not expecting usable results, but I'll make a lot of noise if it ever works properly.
+Note: this is just a pet project to teach myself about neural networks and Theano, but I've managed to get some interesting results (below) that I might do more with at some point.
 
 Note 2: the image data I used to train the ANN is not on github for size reasons.
+
+Here is an example of the current results. I wrote a tweet about the project, took a screenshot (the first image), uploaded that screenshot to Twitter, downloaded that image (middle image), and ran it through the neural network (final image).
+![A screenshot of a tweet, then that screenshot compressed by Twitter, then artefacts removed with a neural network](results.png)
 
 Log:
 2016/09/24
@@ -11,7 +14,7 @@ Log:
 * Loading code can now take a block size (in multiples of 8). It then saves overlapping NxN blocks, and when applying the network it takes the average value returned in overlapping regions (a method adapted from [1]).
 * Decided to optimise for a single set of JPEG parameters, specifically those used by Twitter. I used jpegsnoop to confirm the quantisiation tables are identical for Pillow's JPEG encoder using quality 85 and 4:1:1 subsampling. At some point I might try the generalist version to see how that works.
 * Best results use 24x24 blocks with 4 hidden layers of 8000 neurons each. Raising those numbers might produce even better results.
-* One lingering bug: one test image is a screenshot from Twitter which has a white background. For some reason the result NEVER had a pure white background, the best I got was 255 in two channels, and 254 in the other. Seems too specific to not be a bug. But never found the cause. I might add a hack into the UnJPEG code which matches the output to the input as closely as possible: I don't think this is cheating, but it's not pure neural network.
+* One lingering bug: one test image is a screenshot from Twitter (above) which has a white background. For some reason the result NEVER had a pure white background, the best I got was 255 in two channels, and 254 in the other. Seems too specific to not be a bug. But never found the cause. I might add a hack into the UnJPEG code which matches the output to the input as closely as possible: I don't think this is cheating, but it's not pure neural network.
 
 
 2016/09/13
