@@ -5,6 +5,15 @@ Note: this is just a pet project to teach myself about neural networks and Thean
 Note 2: the image data I used to train the ANN is not on github for size reasons.
 
 Log:
+2016/09/24
+* Have been far down the rabbit hole of trying to find the 'right' parameters to normalise the input data; for some reason the theoretical values produce worse results than ones that are higher. I tried decorrelating the data using PCA as well as using the 'correct' values: still no better. Ended up reverting all that work back to the old method. But did some other stuff in the meanwhile...
+* As well as implementing a system which loads blocks of data on and off the GPU, the code now saves training data in batches, meaning it can load it in and out of RAM to use the full training set (~9million patches). This breaks the old probablistic version which still has some lingering code, but I hope brand new examples are always better than repeated ones.
+* Loading code can now take a block size (in multiples of 8). It then saves overlapping NxN blocks, and when applying the network it takes the average value returned in overlapping regions (a method adapted from [1]).
+* Decided to optimise for a single set of JPEG parameters, specifically those used by Twitter. I used jpegsnoop to confirm the quantisiation tables are identical for Pillow's JPEG encoder using quality 85 and 4:1:1 subsampling. At some point I might try the generalist version to see how that works.
+* Best results use 24x24 blocks with 4 hidden layers of 8000 neurons each. Raising those numbers might produce even better results.
+* One lingering bug: one test image is a screenshot from Twitter which has a white background. For some reason the result NEVER had a pure white background, the best I got was 255 in two channels, and 254 in the other. Seems too specific to not be a bug. But never found the cause. I might add a hack into the UnJPEG code which matches the output to the input as closely as possible: I don't think this is cheating, but it's not pure neural network.
+
+
 2016/09/13
 * Tried a lot of ideas in the past week or so, in no particular order:
     * Shuffle the input blocks
