@@ -1,9 +1,12 @@
 .DS_Store
 misc/
 training/data/
+training/datasets/
 training/images/
 training/results/
 training/__pycache__/
-training/data.pickle
-
+training/*.pkl
+training/partitioneddata/
+*.png
+*.jpg
 
