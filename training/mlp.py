@@ -74,7 +74,7 @@ import pickle
 
 # start-snippet-1
 class HiddenLayer(object):
-	def __init__(self, rng, input, n_in, n_out, W=None, b=None,
+	def __init__(self, rng, input, n_in, n_out, W_values=None, b_values=None,
 				activation=T.tanh):
 		"""
 		Typical hidden layer of a MLP: units are fully-connected and have
@@ -116,7 +116,7 @@ class HiddenLayer(object):
 		#        compared to tanh
 		#        We have no info for other function, so we use the same as
 		#        tanh.
-		if W is None:
+		if W_values is None:
 			W_values = numpy.asarray(
 				# rng.uniform(
 				#     low=-numpy.sqrt(6. / (n_in + n_out)),
@@ -139,12 +139,13 @@ class HiddenLayer(object):
 				W_values *= 4
 			elif activation == theano.tensor.nnet.relu:
 				W_values *= 2
+			
+		W = theano.shared(value=W_values, name='W', borrow=True)
 
-			W = theano.shared(value=W_values, name='W', borrow=True)
-
-		if b is None:
+		if b_values is None:
 			b_values = numpy.zeros((n_out,), dtype=theano.config.floatX)
-			b = theano.shared(value=b_values, name='b', borrow=True)
+			
+		b = theano.shared(value=b_values, name='b', borrow=True)
 
 		self.W = W
 		self.b = b
@@ -234,8 +235,8 @@ class MLP(object):
 	top layer is a softmax layer (defined here by a ``LogisticRegression``
 	class).
 	"""
-
-	def __init__(self, rng, input, n_in, n_hidden, n_out, h_layers, activation=T.tanh):
+	
+	def __init__(self, rng, input, n_in, n_hidden, n_out, h_layers, activation=T.tanh,hiddenWeights=None):
 		"""Initialize the parameters for the multilayer perceptron
 
 		:type rng: numpy.random.RandomState
@@ -258,14 +259,17 @@ class MLP(object):
 
 		"""
 		
-
 		self.hiddenLayers = [None]*(h_layers+1)
 		self.hiddenLayers[0] = HiddenLayer(
 			rng=rng,
 			input=input,
 			n_in=n_in,
 			n_out=n_hidden,
-			activation=activation
+			activation=activation,
+			W_values = (None if hiddenWeights is None
+			     else numpy.asarray(hiddenWeights[0].W.get_value(),dtype=theano.config.floatX)),
+			b_values = (None if hiddenWeights is None
+			     else numpy.asarray(hiddenWeights[0].b.get_value(),dtype=theano.config.floatX))
 		)
 		if h_layers > 1:
 			for i in range(1,h_layers):
@@ -274,23 +278,23 @@ class MLP(object):
 					input=self.hiddenLayers[i-1].output,
 					n_in=n_hidden,
 					n_out=n_hidden,
-					activation=activation
+					activation=activation,
+					W_values = (None if hiddenWeights is None
+						 else numpy.asarray(hiddenWeights[i].W.get_value(),dtype=theano.config.floatX)),
+					b_values = (None if hiddenWeights is None
+						 else numpy.asarray(hiddenWeights[i].b.get_value(),dtype=theano.config.floatX))
 				)
 		self.hiddenLayers[h_layers] = HiddenLayer(
 				rng=rng,
 				input=self.hiddenLayers[h_layers-1].output,
 				n_in=n_hidden,
 				n_out=n_out,
-				activation=activation
+				activation=activation,
+				W_values = (None if hiddenWeights is None
+					 else numpy.asarray(hiddenWeights[h_layers].W.get_value(),dtype=theano.config.floatX)),
+				b_values = (None if hiddenWeights is None
+					 else numpy.asarray(hiddenWeights[h_layers].b.get_value(),dtype=theano.config.floatX))
 			)
-
-		# self.hiddenLayer2 = HiddenLayer(
-		#     rng=rng,
-		#     input=self.hiddenLayer.output,
-		#     n_in=n_hidden,
-		#     n_out=n_hidden,
-		#     activation=T.tanh
-		# )
 
 		self.topLayer = TopLayer(
 			input=self.hiddenLayers[h_layers].output
@@ -326,6 +330,22 @@ class MLP(object):
 		self.input = input
 
 		self.output = self.topLayer.output
+		
+	@staticmethod
+	def existingclassifier(classifier):
+		h_layers = len(classifier.hiddenLayers)-1
+		n_in, n_hidden = classifier.hiddenLayers[0].W.get_value().shape
+		x = T.matrix('x')
+		return MLP(
+			rng=numpy.random.RandomState(1234),
+			input=x,
+			n_in=n_in,
+			n_hidden=n_hidden,
+			n_out=n_in,
+			h_layers=h_layers,
+			activation=lambda x: 1.7159*T.tanh((2/3)*x),
+			hiddenWeights=classifier.hiddenLayers
+		)
 
 def load_test_data(m=0,s=1):
 	with numpy.load('testdata.pkl', 'rb') as data:
