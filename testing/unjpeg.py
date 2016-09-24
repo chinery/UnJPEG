@@ -61,7 +61,7 @@ if __name__ == '__main__':
     # im = scipy.misc.imread("test2.jpg",mode='YCbCr')/255
     im = scipy.misc.imread("test2.jpg",mode='YCbCr')/255
 
-    cleanim = unjpeg(im,classifier,0.58,0.28)
+    cleanim = unjpeg(im,classifier,0.58,0.38)
 
     res = Image.fromarray(numpy.uint8(cleanim*255),mode='YCbCr').convert('RGB')
     res.save('test2.png')
