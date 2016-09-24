@@ -5,6 +5,7 @@ Note: this is just a pet project to teach myself about neural networks and Thean
 Note 2: the image data I used to train the ANN is not on github for size reasons.
 
 Here is an example of the current results. I wrote a tweet about the project, took a screenshot (the first image), uploaded that screenshot to Twitter, downloaded that image (middle image), and ran it through the neural network (final image).
+
 ![A screenshot of a tweet, then that screenshot compressed by Twitter, then artefacts removed with a neural network](result.png)
 
 Log:
