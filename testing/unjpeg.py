@@ -26,15 +26,11 @@ if __name__ == '__main__':
         with open('cpu_model.pkl', 'rb') as f:
             classifier = pickle.load(f)
         
-    with open('params.pkl', 'rb') as file:
-        params = pickle.load(file)
-        blocksize = pickle.load(file)
-        
-        
+    blocksize = numpy.uint32(numpy.sqrt(classifier.hiddenLayers[0].W.get_value().shape[0]/3))
     rgbim = scipy.misc.imread("test.jpg",mode='RGB')/255
     im = rgb2ycbcr(rgbim)
 
-    cleanim = ycbcr2rgb(unjpeg(im,classifier,params,blocksize,0.58,0.38))
+    cleanim = ycbcr2rgb(unjpeg(im,classifier,blocksize,0.58,0.38))
 
     res = Image.fromarray(numpy.uint8(numpy.round(cleanim*255)),mode='RGB')
     res.save('test.png')

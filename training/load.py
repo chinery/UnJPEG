@@ -13,34 +13,7 @@ from mlp import rgb2ycbcr, ycbcr2rgb
 def binarysearch(data,search):
 	ix = numpy.searchsorted(data,search)
 	return ix < len(data) and search == data[ix]
-	
-def pca(data):
-	centreddata = data
-	# mu =  numpy.tile(numpy.asarray([numpy.mean(centreddata[:,::3]),numpy.mean(centreddata[:,1::3]),numpy.mean(centreddata[:,2::3])]),blocksize*blocksize)
-	# centreddata -= mu
-	# # (u,s,v) = numpy.linalg.svd(centreddata, full_matrices=False)
-	v = numpy.eye(centreddata.shape[1])
-	# centreddata = numpy.dot(centreddata,v)
-	# sig = numpy.tile(numpy.asarray([numpy.std(centreddata[:,::3]),numpy.std(centreddata[:,1::3]),numpy.std(centreddata[:,2::3])]),blocksize*blocksize)
-	# centreddata /= sig
-	# # print('\npca std ', numpy.std(centreddata,axis=0)[0])
-	# return (centreddata, (mu, sig, v))
-	return (centreddata, (0, 1, v))
-	
-def centre(data,params):
-	centreddata = data
-	# centreddata -= params[0]
-	# centreddata = numpy.dot(centreddata,params[2])
-	# centreddata /= params[1]
-	return centreddata
-	
-def reconstruct(data, params):
-	recon = data
-	# recon *= params[1]
-	# recon = numpy.dot(recon,params[2].T)
-	# recon += params[0]
-	return recon
-	
+
 	
 #images = [entry for entry in os.scandir('./images/') if entry.is_file()]
 images = glob.glob('./images/*.png')
@@ -134,20 +107,6 @@ for ix,imgpath in enumerate(images):
 				train_count += 1
 				if train_count == maxmemsize:
 					# save a batch of partitions
-					if bulk_count == 0:
-						_, params = pca(bulktraining_in.copy())
-						if numpy.allclose(reconstruct(centre(bulktraining_in[10,:].copy(),params),params),bulktraining_in[10,:]):
-							print('close!')
-						else:
-							print('not close!!')
-							print(numpy.isclose(reconstruct(centre(bulktraining_in[10,:].copy(),params),params),bulktraining_in[10,:]))
-						with open('params.pkl', 'wb') as file:
-							pickle.dump(params,file)
-							pickle.dump(blocksize,file)
-					
-					bulktraining_gt = centre(bulktraining_gt, params)
-					bulktraining_in = centre(bulktraining_in, params)
-					
 					print('\nSaving partitions {} to {}'.format(partition_count,partition_count+ppbulk-1))
 					for partix in range(0,ppbulk):
 						training_gt = bulktraining_gt[partix*partition_size:(partix+1)*partition_size,:]
@@ -182,22 +141,7 @@ print("")
 print("{} testing blocks".format(testnum))
 
 
-# Now done while storing
-# print("Shuffling")
-# alltraining = numpy.concatenate([training_gt,training_in],axis=1)
-# numpy.random.shuffle(alltraining)
-# alltesting = numpy.concatenate([testing_gt,testing_in],axis=1)
-# numpy.random.shuffle(alltesting)
-
-# training_gt = alltraining[:,:blocksize*blocksize*3]
-# training_in = alltraining[:,blocksize*blocksize*3:]
-# testing_gt = alltesting[:,:blocksize*blocksize*3]
-# testing_in = alltesting[:,blocksize*blocksize*3:]
-
 print("Saving test data")
-
-testing_gt = centre(testing_gt, params)
-testing_in = centre(testing_in, params)
 
 with open('testdata.pkl', 'wb') as file:
 	numpy.savez_compressed(file,testing_gt=testing_gt,testing_in=testing_in)
