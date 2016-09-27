@@ -1,2 +1,4 @@
-best_model.pkl filter=lfs diff=lfs merge=lfs -text
+
 cpu_model.pkl filter=lfs diff=lfs merge=lfs -text
+gpu_model.pkl filter=lfs diff=lfs merge=lfs -text
+cpumodel.pkl filter=lfs diff=lfs merge=lfs -text

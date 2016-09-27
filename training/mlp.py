@@ -139,7 +139,7 @@ class HiddenLayer(object):
                 W_values *= 4
             elif activation == theano.tensor.nnet.relu:
                 W_values *= 2
-            
+        
         W = theano.shared(value=W_values, name='W', borrow=True)
 
         if b_values is None:
@@ -236,7 +236,7 @@ class MLP(object):
     class).
     """
     
-    def __init__(self, rng, input, n_in, n_hidden, n_out, h_layers, activation=T.tanh,hiddenWeights=None):
+    def __init__(self, rng, input, n_in, n_hidden, n_out, h_layers, activation=T.tanh,hiddenWeights=None,train_parameters=None):
         """Initialize the parameters for the multilayer perceptron
 
         :type rng: numpy.random.RandomState
@@ -258,6 +258,10 @@ class MLP(object):
         which the labels lie
 
         """
+        if train_parameters is None:
+            self.train_parameters = {}
+        else:
+            self.train_parameters = train_parameters
         
         self.hiddenLayers = [None]*(h_layers+1)
         self.hiddenLayers[0] = HiddenLayer(
@@ -321,7 +325,7 @@ class MLP(object):
         # same holds for the function computing the number of errors
         self.error = self.topLayer.error
 
-        # the parameters of the model are the parameters of the two layer it is
+        # the parameters of the model are the parameters of the layers it is
         # made out of
         self.params = [param for layer in self.hiddenLayers for param in layer.params]
         # end-snippet-3
@@ -385,34 +389,6 @@ def load_chunk_range(indices,m=0,s=1):
             
     return (data_x, data_y)
     
-def load_data(dataset,m=0,s=1):
-    ''' Loads the dataset
-
-    :type dataset: int
-    :param dataset: how many to load
-    '''
-
-    #############
-    # LOAD DATA #
-    #############
-
-    with numpy.load('1616data.pickle', 'rb') as data:
-        # training_gt = data['arr_0']
-        # training_in = data['arr_1']
-        # testing_gt = data['arr_2']
-        # testing_in = data['arr_3']
-        training_gt = data['training_gt']
-        training_in = data['training_in']
-        testing_gt = data['testing_gt']
-        testing_in = data['testing_in']
-
-    training_gt = (training_gt-m)/s
-    training_in = (training_in-m)/s
-    testing_gt = (testing_gt-m)/s
-    testing_in = (testing_in-m)/s
-
-    rval = [(training_in, training_gt), (testing_in, testing_gt)]
-    return rval
 
 def shared_dataset(data_x, data_y, borrow=True):
     """ Function that loads the dataset into shared variables
@@ -466,12 +442,11 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     :param n_epochs: maximal number of epochs to run the optimizer
 
 """
-    with open('params.pkl', 'rb') as file:
-        params = pickle.load(file)
-        blocksize = pickle.load(file)
     
     print('... loading test data')
     valid_set_x, valid_set_y = load_test_data(m,s)
+    
+    blocksize = numpy.uint32(numpy.sqrt(valid_set_x.shape[1]/3))
     
     print('... loading first batch of training data')
     numofchunks = len(glob.glob('./partitioneddata/*.pkl'))
@@ -481,7 +456,6 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     numperload = data_x.shape[0]
     if maxload % numperload != 0:
         print('Error: maxload must be a multiple of saved data partition size')
-    
     
     
     loadspervalidation = maxload//numperload
@@ -530,7 +504,6 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     rng = numpy.random.RandomState(1234)
 
     n_in = blocksize*blocksize*3
-
     # construct the MLP class
     classifier = MLP(
         rng=rng,
@@ -539,7 +512,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
         n_hidden=n_hidden,
         n_out=n_in,
         h_layers=h_layers,
-        activation=lambda x: 1.7159*T.tanh((2/3)*x)
+        activation=lambda x: 1.7159*T.tanh((2/3)*x),
+        train_parameters={'mean': m, 'scale': s, 'batch_size':batch_size, 'learning_rate':learning_rate} 
     )
 
     neurons_per_layer = [n_in] + [n_hidden]*h_layers + [n_hidden]
@@ -579,7 +553,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # element is a pair formed from the two lists :
     #    C = [(a1, b1), (a2, b2), (a3, b3), (a4, b4)]
     updates = [
-        (param, param - (learning_rate/div) * gparam)
+        (param, param - numpy.float32(learning_rate/div) * gparam)
         for param, gparam, div in zip(classifier.params, gparams, neurons_per_layer)
     ]
 
@@ -650,8 +624,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     rgbim = scipy.misc.imread("test.jpg",mode='RGB')/255
     im = rgb2ycbcr(rgbim)
 
-    # sig = s
-    sig = numpy.mean(params[1])*s
+    sig = s
     
     #prob = numpy.ones(num_of_samples)/num_of_samples
     #p_weight = 2
@@ -747,9 +720,9 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                         with open('results/models/{}.pkl'.format(name), 'wb') as f:
                                 pickle.dump(classifier, f)
 
-                        cleanim = unjpeg(im,classifier,params,blocksize,m,s)
+                        cleanim = unjpeg(im,classifier,blocksize,m,s)
                         outim = ycbcr2rgb(cleanim)
-                        res = Image.fromarray(numpy.uint8(outim*255),mode='RGB')
+                        res = Image.fromarray(numpy.uint8(numpy.round(outim*255)),mode='RGB')
                         res.save('results/outimages/{}.png'.format(name))
 
                         # if we got the best validation score until now
@@ -812,21 +785,8 @@ def ycbcr2rgb(ycbcrim):
     im = numpy.clip(im,0,1)
     return im
     
-def centre(data,params):
-    centreddata = data
-    centreddata -= params[0]
-    centreddata = numpy.dot(centreddata,params[2])
-    centreddata /= params[1]
-    return centreddata
     
-def reconstruct(data, params):
-    recon = data
-    recon *= params[1]
-    recon = numpy.dot(recon,params[2].T)
-    recon += params[0]
-    return recon
-    
-def unjpeg(im,classifier,params,blocksize,m=0,s=1):
+def unjpeg(im,classifier,blocksize,m=0,s=1):
     """
     Apply to an image
     """
@@ -858,14 +818,11 @@ def unjpeg(im,classifier,params,blocksize,m=0,s=1):
             blocks[count,:] = block.reshape((1,blocksize*blocksize*3))
             count += 1
 
-    blocks = centre(blocks,params)
     blocks = (blocks-m)/s
 
-    predict = predict_model(blocks)
+    prediction = predict_model(blocks)
 
-    predict = (predict*s)+m
-
-    predict = reconstruct(predict,params)
+    prediction = (prediction*s)+m
 
     result = numpy.zeros((math.ceil(h/8)*8, math.ceil(w/8)*8,3),dtype=theano.config.floatX)
     rescount = numpy.zeros((math.ceil(h/8)*8, math.ceil(w/8)*8,3),dtype=theano.config.floatX)
@@ -874,15 +831,15 @@ def unjpeg(im,classifier,params,blocksize,m=0,s=1):
     for i in range(0,math.ceil(h/8)-((blocksize//8)-1)):
         for j in range(0,math.ceil(w/8)-((blocksize//8)-1)):
             
-            nblock = predict[count,:].reshape((blocksize,blocksize,3))
+            nblock = prediction[count,:].reshape((blocksize,blocksize,3))
             count += 1
 
-            result[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] = result[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] + nblock
-            rescount[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] = rescount[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] + 1
+            result[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] += nblock
+            rescount[i*8:(i*8)+blocksize,j*8:(j*8)+blocksize,:] += 1
 
     result = result/rescount
     result = numpy.clip(result,0,1)
     return result[0:h,0:w,:]
 
 if __name__ == '__main__':
-    test_mlp(n_epochs=1000, batch_size=100,learning_rate=500,n_hidden=8000,h_layers=4,L2_reg=0.0000,m=0.58,s=0.38,maxload=100000,epochper=5)
+    test_mlp(n_epochs=1000, batch_size=100,learning_rate=500,n_hidden=6912,h_layers=3,L2_reg=0.0000,m=0.58,s=0.38,maxload=100000,epochper=2)
