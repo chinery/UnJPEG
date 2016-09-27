@@ -9,6 +9,11 @@ Here is an example of the current results. I wrote a tweet about the project, to
 ![A screenshot of a tweet, then that screenshot compressed by Twitter, then artefacts removed with a neural network](result.png)
 
 Log:
+2016/09/26
+* Minor changes. Added (rather, fixed) the ability to initialise the model with existing parameters, so I could make a non-GPU dependent version of the pickled model. Not sure if it was caused by this or not, but suddenly I was getting errors with float64 dtype (even though I always use theano.config.floatX). The cause was scaling the learning rate by the number of input neurons, it needed an explicit cast to work properly. But the code hadn't changed, I have no idea why this didn't come up before.
+* Trained a new model that's a bit smaller to improve performance.
+* Tweaked a couple of things including rounding when saving the image (not sure if the cast rounds or not), also clipping during the error measure. Not sure what precisely caused it, could even just be the new model size, but I finally got a pure white output on my test image! The results have been updated with this new model.
+
 2016/09/24
 * Have been far down the rabbit hole of trying to find the 'right' parameters to normalise the input data; for some reason the theoretical values produce worse results than ones that are higher. I tried decorrelating the data using PCA as well as using the 'correct' values: still no better. Ended up reverting all that work back to the old method. But did some other stuff in the meanwhile...
 * As well as implementing a system which loads blocks of data on and off the GPU, the code now saves training data in batches, meaning it can load it in and out of RAM to use the full training set (~9million patches). This breaks the old probabilistic version which still has some lingering code, but I hope brand new examples are always better than repeated ones.
