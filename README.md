@@ -1,4 +1,4 @@
-##UnJPEG: removing jpeg artefacts from screenshots with a neural network
+## UnJPEG: removing jpeg artefacts from screenshots with a neural network
 
 Note: this is just a pet project to teach myself about neural networks and Theano, but I've managed to get some interesting results (below) that I might do more with at some point.
 
